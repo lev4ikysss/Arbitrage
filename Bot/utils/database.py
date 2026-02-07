@@ -119,10 +119,48 @@ class DataBase:
     def is_payment(self, user_id: int) -> bool:
         """
             Проверяет подписку у пользователя
+            :user_id: id пользователя
         """
         self.cur.execute("""
             SELECT * FROM users
             WHERE user_id = ? AND is_allowed = TRUE
+        """, (user_id))
+        if not self.cur.fetchall():
+            return False
+        return True
+    
+    def add_payment(self, user_id: int, payment_add: int) -> None:
+        """
+            Добавление проплаченных дней пользователю
+            :user_id: id пользователя
+            :payment_add: кол-во дней добавления
+        """
+        self.cur.execute("""
+            UPDATE users SET
+            is_allowed = TRUE, day_payment = day_payment + ?
+            WHERE user_id = ?
+        """, (payment_add, user_id))
+        self.con.commit()
+
+    def add_admin(self, user_id: int) -> None:
+        """
+            Добавляет роль администратора
+            :user_id: id пользователя
+        """
+        self.cur.execute("""
+            UPDATE users SET
+            is_admin = TRUE, is_allowed = TRUE, day_payment = -1
+            WHERE user_id = ?
+        """, (user_id))
+        self.con.commit()
+
+    def is_admin(self, user_id: int) -> bool:
+        """
+        
+        """
+        self.cur.execute("""
+            SELECT * FROM users
+            WHERE user_id = ? AND is_admin = TRUE
         """, (user_id))
         if not self.cur.fetchall():
             return False
