@@ -11,6 +11,7 @@ params = GetParams("config.conf")
 tg = telebot.TeleBot(params.token_tg)
 codes = Codes(params.codes_path)
 db = DataBase(params.db_path)
+birges = ["Bybit", "Mexc", "Gate", "HTX", "Bitmart", "Kucoin", "OKX", "Coinex", "Poloniex", "BingX"]
 
 def menu(message: telebot.types.Message):
     markup = ReplyKeyboardMarkup(
@@ -72,7 +73,7 @@ def new_message(message: telebot.types.Message):
         menu(message)
     elif message.text == "🏦 Какие биржи поддерживаются?":
         tg.send_message(message.chat.id, """
-            Зарегистрируйся по ссылкам, пройди KYC и включи 2FA.
+            Поддерживаемые биржи: Bybit, Mexc, Gate, HTX, Bitmart, Kucoin, OKX, Coinex, Poloniex, BingX.
         """)
         menu(message)
     elif message.text == "⚠️ Какие риски?":
@@ -80,9 +81,72 @@ def new_message(message: telebot.types.Message):
             ⚠️ Риски: не меняй адреса! Проверяй ссылки. Используй лимитные ордера.
         """)
         menu(message)
-    elif message.text == "":
-        pass
-
+    elif message.text == "💰 Объем сделки":
+        markup = ReplyKeyboardMarkup(
+            resize_keyboard=True,
+            one_time_keyboard=True,
+            row_width=1
+        )
+        markup.add(
+            KeyboardButton("10-100$"),
+            KeyboardButton("100-500$"),
+            KeyboardButton("500-1000$")
+        )
+        tg.send_message(message.chat.id, "Выберите объем:", reply_markup=markup)
+    elif message.text == "10-100$":
+        settings = db.get_settings(message.from_user.id)
+        settings["valuen"] = 0
+        db.set_settings(message.from_user.id, settings)
+        tg.send_message(message.chat.id, "Успешно изменено!")
+        menu(message)
+    elif message.text == "100-500$":
+        settings = db.get_settings(message.from_user.id)
+        settings["valuen"] = 1
+        db.set_settings(message.from_user.id, settings)
+        tg.send_message(message.chat.id, "Успешно изменено!")
+        menu(message)
+    elif message.text == "500-1000$":
+        settings = db.get_settings(message.from_user.id)
+        settings["valuen"] = 2
+        db.set_settings(message.from_user.id, settings)
+        tg.send_message(message.chat.id, "Успешно изменено!")
+        menu(message)
+    elif message.text == "📈 Стратегия":
+        markup = ReplyKeyboardMarkup(
+            resize_keyboard=True,
+            one_time_keyboard=True,
+            row_width=1
+        )
+        markup.add(
+            KeyboardButton("Максимум прибыли"),
+            KeyboardButton("Сбалансированная"),
+            KeyboardButton("Минимальный риск")
+        )
+        tg.send_message(message.chat.id, "❗️ Рекомендуем 'Сбалансированная'. Выбери:", reply_markup=markup)
+    elif message.text == "Максимум прибыли":
+        settings = db.get_settings(message.from_user.id)
+        settings["strategy"] = 2
+        db.set_settings(message.from_user.id, settings)
+        tg.send_message(message.chat.id, "Успешно изменено!")
+        menu(message)
+    elif message.text == "Сбалансированная":
+        settings = db.get_settings(message.from_user.id)
+        settings["strategy"] = 1
+        db.set_settings(message.from_user.id, settings)
+        tg.send_message(message.chat.id, "Успешно изменено!")
+        menu(message)
+    elif message.text == "Минимальный риск":
+        settings = db.get_settings(message.from_user.id)
+        settings["strategy"] = 0
+        db.set_settings(message.from_user.id, settings)
+        tg.send_message(message.chat.id, "Успешно изменено!")
+        menu(message)
+    elif message.text == "🏦 Биржи":
+        settings = db.get_settings(message.from_user.id)["birges"]
+        buttons = [KeyboardButton("✅ "+i if i in settings else "❌ "+i) for i in birges]
+        markup.add(*buttons)
+        tg.send_message(message.chat.id, "Выберите биржи:", reply_markup=markup)
+    elif 
     
     elif codes.is_invite(message.text):
         db.add_payment(message.from_user.id, 30)

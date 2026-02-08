@@ -66,13 +66,18 @@ class DataBase:
         self.con = sqlite3.connect(path)
         self.cur = self.con.cursor()
 
-        self.cur.execute("""
+        self.cur.execute(f"""
             CREATE TABLE IF NOT EXISTS users (
                 user_id     INTEGER UNIQUE PRIMARY KEY NOT NULL,
                 chat_id     INTEGER UNIQUE NOT NULL,
                 is_allowed  BOOLEAN NOT NULL DEFAULT FALSE,
                 is_admin    BOOLEAN NOT NULL DEFAULT FALSE,
-                day_payment INTEGER NOT NULL DEFAULT 0
+                day_payment INTEGER NOT NULL DEFAULT 0,
+                settings    TEXT NOT NULL DEFAULT {json.dumps({
+                    "valuen": 0,
+                    "strategy": 1,
+                    "birges": []
+                })}
             )
         """)
         self.con.commit()
@@ -156,7 +161,8 @@ class DataBase:
 
     def is_admin(self, user_id: int) -> bool:
         """
-        
+            Проверяет, админ ли пользователь
+            :user_id: id пользователя
         """
         self.cur.execute("""
             SELECT * FROM users
@@ -165,3 +171,26 @@ class DataBase:
         if not self.cur.fetchall():
             return False
         return True
+    
+    def get_settings(self, user_id: int) -> dict:
+        """
+            Получает настройки пользователя
+            :user_id: id пользователя
+        """
+        self.cur.execute("""
+            SELECT settings FROM users
+            WHERE user_id = ?
+        """, (user_id))
+        return json.loads(self.cur.fetchone()[0])
+    
+    def set_settings(self, user_id: int, settings: dict) -> None:
+        """
+            Устанавливает настройки пользователя
+            :user_id: id пользователя
+        """
+        self.cur.execute("""
+            UPDATE users SET
+            settings = ?
+            WHERE user_id = ?
+        """, (json.dumps(settings), user_id))
+        self.con.commit()
