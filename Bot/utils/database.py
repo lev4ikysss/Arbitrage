@@ -147,6 +147,17 @@ class DataBase:
         """, (payment_add, user_id))
         self.con.commit()
 
+    def get_payment(self, user_id: int) -> int:
+        """
+            Получает кол-во проплаченных дней пользователя
+            :user_id: id пользователя
+        """
+        self.cur.execute("""
+            SELECT day_payment FROM users
+            WHERE user_id = ?
+        """, (user_id))
+        return self.cur.fetchone()[0]
+
     def add_admin(self, user_id: int) -> None:
         """
             Добавляет роль администратора

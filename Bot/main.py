@@ -12,6 +12,10 @@ tg = telebot.TeleBot(params.token_tg)
 codes = Codes(params.codes_path)
 db = DataBase(params.db_path)
 birges = ["Bybit", "Mexc", "Gate", "HTX", "Bitmart", "Kucoin", "OKX", "Coinex", "Poloniex", "BingX"]
+bad_birges = ["❌ "+i for i in birges]
+good_birges = ["✅ "+i for i in birges]
+
+in_searching = []
 
 def menu(message: telebot.types.Message):
     markup = ReplyKeyboardMarkup(
@@ -146,8 +150,60 @@ def new_message(message: telebot.types.Message):
         buttons = [KeyboardButton("✅ "+i if i in settings else "❌ "+i) for i in birges]
         markup.add(*buttons)
         tg.send_message(message.chat.id, "Выберите биржи:", reply_markup=markup)
-    elif 
-    
+    elif message.text in bad_birges:
+        settings = db.get_settings(message.from_user.id)
+        settings["birges"].append(message.text[2:])
+        db.set_settings(message.from_user.id, settings)
+        tg.send_message(message.chat.id, f"Успешно добавлена биржа {message.text[2:]}!")
+        menu(message)
+    elif message.text in good_birges:
+        settings = db.get_settings(message.from_user.id)
+        settings["birges"].remove(message.text[2:])
+        db.set_settings(message.from_user.id, settings)
+        tg.send_message(message.chat.id, f"Успешно удалена биржа {message.text[2:]}!")
+        menu(message)
+    elif message.text == "Создать код регистрации" and db.is_admin(message.from_user.id):
+        key = codes.generate_invite()
+        tg.send_message(message.chat.id, f"Код: {key}")
+        menu(message)
+    elif message.text == "👤 Личный кабинет":
+        settings = db.get_settings(message.from_user.id)
+        payment = db.get_payment(message.from_user.id)
+        answers = [
+            ["10-100$", "100-500$", "500-1000$"],
+            ["Минимальный риск", "Сбалансированная", "Максимум прибыли"]
+        ]
+        tg.send_message(message.chat.id, f"""
+            👤 Личный кабинет
+                        
+            🔑 Статус подписки: {str(payment)+" дней" if payment != 0 else "Не активна"}
+            💰 Объем сделки: {answers[0][settings["valuen"]]}
+            📈 Стратегия: {answers[1][settings["strategy"]]}
+            🏦 Активные биржи: {*settings["birges"],}
+        """)
+        menu(message)
+    elif message.text == "🚀 Начать поиск":
+        in_searching.append({
+            "user_id": message.from_user.id,
+            "chat_id": message.chat.id
+        })
+        markup = ReplyKeyboardMarkup(
+            resize_keyboard=True,
+            one_time_keyboard=False,
+            row_width=1
+        )
+        markup.add(KeyboardButton("🛑 СТОП"))
+        tg.send_message(message.chat.id, """
+            Поиск запущен! Связки будут приходить автоматически.
+            Используй 🛑 СТОП для паузы.
+        """, reply_markup=markup)
+    elif message.text == "🛑 СТОП":
+        in_searching.remove({
+            "user_id": message.from_user.id,
+            "chat_id": message.chat.id
+        })
+        tg.send_message(message.chat.id, "Поиск остановлен!")
+        menu(message)
     elif codes.is_invite(message.text):
         db.add_payment(message.from_user.id, 30)
         tg.reply_to(message, "Вы зарегистрированы!")
@@ -161,6 +217,14 @@ def bot_listener():
     while True:
         try:
             tg.infinity_polling(timeout=10, long_polling_timeout=5)
+        except Exception as e:
+            print(f"Ошибка polling: {e}")
+            time.sleep(10)
+
+def bot_server():
+    while True:
+        try:
+            
         except Exception as e:
             print(f"Ошибка polling: {e}")
             time.sleep(10)
