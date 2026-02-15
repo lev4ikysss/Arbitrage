@@ -1,4 +1,5 @@
 import threading
+import datetime
 import time
 import telebot
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton
@@ -217,6 +218,25 @@ def bot_listener():
     while True:
         try:
             tg.infinity_polling(timeout=10, long_polling_timeout=5)
+        except Exception as e:
+            print(f"Ошибка polling: {e}")
+            time.sleep(10)
+
+def bot_counter():
+    while True:
+        try:
+            timestamp = datetime.datetime.now()
+            if timestamp.hour == 12 and timestamp.minute == 0 and timestamp.second == 0:
+                active_users = db.fetch_all_payment()
+                for key in active_users.keys():
+                    active_users[key] -= 1
+                    db.add_payment(key, -1)
+                    if active_users[key] == params.payment_warning:
+                        tg.send_message(db.get_chat(key), f"Ваш доступ истечет через {params.payment_warning} дней!\nПриобретите новый ключ, чтобы не потерять доступ к боту!")
+                    elif active_users[key] == 0:
+                        tg.send_message(db.get_chat(key), f"Ваш доступ истек!\nПриобретите новый ключ, чтобы востановить доступ к боту!")
+                        db.del_allow(key)
+            time.sleep(1)
         except Exception as e:
             print(f"Ошибка polling: {e}")
             time.sleep(10)

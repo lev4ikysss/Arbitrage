@@ -147,6 +147,17 @@ class DataBase:
         """, (payment_add, user_id))
         self.con.commit()
 
+    def del_allow(self, user_id: int) -> None:
+        """
+            Удаление статуса is_allowed
+        """
+        self.cur.execute("""
+            UPDATE users SET
+            is_allowed = FALSE
+            WHERE user_id = ?
+        """, (user_id))
+        self.con.commit()
+
     def get_payment(self, user_id: int) -> int:
         """
             Получает кол-во проплаченных дней пользователя
@@ -205,3 +216,29 @@ class DataBase:
             WHERE user_id = ?
         """, (json.dumps(settings), user_id))
         self.con.commit()
+
+    def fetch_all_payment(self) -> dict:
+        """
+            Получает инфо о сроке подписке всех пользователей
+        """
+        self.cur.execute("""
+            SELECT user_id, day_payment FROM users
+            WHERE is_allowed = TRUE
+        """)
+        answer = {}
+        for i in self.cur.fetchall():
+            answer[i[0]] = i[1]
+        return answer
+
+    def get_chat(self, user_id: int) -> int:
+        """
+            Получает id чата, по id пользователя
+            :user_id: id пользователя
+        """
+        self.cur.execute("""
+            SELECT chat_id FROM users
+            WHERE user_id = ?
+        """, (user_id))
+        return self.cur.fetchone()[0]
+    
+    

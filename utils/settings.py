@@ -11,3 +11,5 @@ class GetParams:
         self.token_tg = configuration["tg"]["token"]
         self.db_path = configuration["database"]["path"]
         self.codes_path = configuration["codes"]["path"]
+        self.payment_warning = int(configuration["bot"]["payment_warning"])
+        
