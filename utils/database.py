@@ -32,6 +32,8 @@ class Codes:
         if not code in file["invite"]:
             return False
         file["invite"].remove(code)
+        with open(self.path, 'w') as f:
+            file = json.dump(file, f, indent=4)
         return True
     
     def write_admin(self, new_code: str) -> None:
@@ -52,10 +54,11 @@ class Codes:
         """
         with open(self.path, 'r') as f:
             file = json.load(f)
-        code = uuid4()
+        code = str(uuid4())
         file["invite"].append(code)
         with open(self.path, 'w') as f:
             json.dump(file, f, indent=4)
+        return code
 
 class DataBase:
     def __init__(self, path: str):
@@ -63,21 +66,17 @@ class DataBase:
             Работа с базой данных
             :path: путь до базы данных
         """
-        self.con = sqlite3.connect(path)
+        self.con = sqlite3.connect(path, check_same_thread=False)
         self.cur = self.con.cursor()
 
-        self.cur.execute(f"""
+        self.cur.execute("""
             CREATE TABLE IF NOT EXISTS users (
-                user_id     INTEGER UNIQUE PRIMARY KEY NOT NULL,
+                user_id     INTEGER PRIMARY KEY NOT NULL,
                 chat_id     INTEGER UNIQUE NOT NULL,
                 is_allowed  BOOLEAN NOT NULL DEFAULT FALSE,
                 is_admin    BOOLEAN NOT NULL DEFAULT FALSE,
                 day_payment INTEGER NOT NULL DEFAULT 0,
-                settings    TEXT NOT NULL DEFAULT {json.dumps({
-                    "valuen": 0,
-                    "strategy": 1,
-                    "birges": []
-                })}
+                settings    TEXT NOT NULL DEFAULT '{}'
             )
         """)
         self.con.commit()
@@ -102,6 +101,12 @@ class DataBase:
                 VALUES (?, ?)
             """, (user_id, chat_id))
             self.con.commit()
+            self.cur.execute("""
+                UPDATE users
+                SET settings = ?
+                WHERE settings = '{}'
+            """, (json.dumps({"valuen": 0, "strategy": 1, "birges": []}, ensure_ascii=False),))
+            self.con.commit()
         except:
             return 1
         return 0
@@ -116,7 +121,7 @@ class DataBase:
         self.cur.execute("""
             SELECT * FROM users
             WHERE user_id = ?
-        """, (user_id))
+        """, (user_id,))
         if not self.cur.fetchall():
             return False
         return True
@@ -129,7 +134,7 @@ class DataBase:
         self.cur.execute("""
             SELECT * FROM users
             WHERE user_id = ? AND is_allowed = TRUE
-        """, (user_id))
+        """, (user_id,))
         if not self.cur.fetchall():
             return False
         return True
@@ -155,7 +160,7 @@ class DataBase:
             UPDATE users SET
             is_allowed = FALSE
             WHERE user_id = ?
-        """, (user_id))
+        """, (user_id,))
         self.con.commit()
 
     def get_payment(self, user_id: int) -> int:
@@ -166,7 +171,7 @@ class DataBase:
         self.cur.execute("""
             SELECT day_payment FROM users
             WHERE user_id = ?
-        """, (user_id))
+        """, (user_id,))
         return self.cur.fetchone()[0]
 
     def add_admin(self, user_id: int) -> None:
@@ -178,7 +183,7 @@ class DataBase:
             UPDATE users SET
             is_admin = TRUE, is_allowed = TRUE, day_payment = -1
             WHERE user_id = ?
-        """, (user_id))
+        """, (user_id,))
         self.con.commit()
 
     def is_admin(self, user_id: int) -> bool:
@@ -187,12 +192,10 @@ class DataBase:
             :user_id: id пользователя
         """
         self.cur.execute("""
-            SELECT * FROM users
+            SELECT 1 FROM users
             WHERE user_id = ? AND is_admin = TRUE
-        """, (user_id))
-        if not self.cur.fetchall():
-            return False
-        return True
+        """, (user_id,))
+        return self.cur.fetchone() is not None
     
     def get_settings(self, user_id: int) -> dict:
         """
@@ -202,7 +205,7 @@ class DataBase:
         self.cur.execute("""
             SELECT settings FROM users
             WHERE user_id = ?
-        """, (user_id))
+        """, (user_id,))
         return json.loads(self.cur.fetchone()[0])
     
     def set_settings(self, user_id: int, settings: dict) -> None:
@@ -238,7 +241,7 @@ class DataBase:
         self.cur.execute("""
             SELECT chat_id FROM users
             WHERE user_id = ?
-        """, (user_id))
+        """, (user_id,))
         return self.cur.fetchone()[0]
     
     

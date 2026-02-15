@@ -56,9 +56,23 @@ def start(message: telebot.types.Message):
 
 @tg.message_handler(func=lambda message: True)
 def new_message(message: telebot.types.Message):
-    if not db.is_register(message.from_user.id) or not db.is_payment(message.from_user.id):
+    if codes.is_invite(message.text):
+        db.add_payment(message.from_user.id, 30)
+        tg.reply_to(message, "Вы зарегистрированы!")
+        menu(message)
+    elif codes.is_admin(message.text):
+        db.add_admin(message.from_user.id)
+        tg.reply_to(message, "Вы теперь администратор")
+        menu(message)
+    elif message.text == "Создать код регистрации" and db.is_admin(message.from_user.id):
+        key = codes.generate_invite()
+        tg.send_message(message.chat.id, f"Код: {key}")
+        menu(message)
+    elif not (db.is_register(message.from_user.id) or db.is_payment(message.from_user.id)):
         tg.reply_to(message, "Ты не зарегистрирован, пропиши /start для начала!")
+        db.add_user(message.from_user.id, message.chat.id)
         return None
+
     if message.text == "⚙️ Тех. поддержка":
         markup = ReplyKeyboardMarkup(
             resize_keyboard=True,
@@ -72,19 +86,13 @@ def new_message(message: telebot.types.Message):
         )
         tg.send_message(message.chat.id, "Что вы хотите спросить?", reply_markup=markup)
     elif message.text == "❓ Что такое арбитраж?":
-        tg.send_message(message.chat.id, """
-            Арбитраж — покупка дешево на одной бирже, продажа дороже на другой. Риск: рынок меняется!
-        """)
+        tg.send_message(message.chat.id, """Арбитраж — покупка дешево на одной бирже, продажа дороже на другой. Риск: рынок меняется!""")
         menu(message)
     elif message.text == "🏦 Какие биржи поддерживаются?":
-        tg.send_message(message.chat.id, """
-            Поддерживаемые биржи: Bybit, Mexc, Gate, HTX, Bitmart, Kucoin, OKX, Coinex, Poloniex, BingX.
-        """)
+        tg.send_message(message.chat.id, """Поддерживаемые биржи: Bybit, Mexc, Gate, HTX, Bitmart, Kucoin, OKX, Coinex, Poloniex, BingX.""")
         menu(message)
     elif message.text == "⚠️ Какие риски?":
-        tg.send_message(message.chat.id, """
-            ⚠️ Риски: не меняй адреса! Проверяй ссылки. Используй лимитные ордера.
-        """)
+        tg.send_message(message.chat.id, """⚠️ Риски: не меняй адреса! Проверяй ссылки. Используй лимитные ордера.""")
         menu(message)
     elif message.text == "💰 Объем сделки":
         markup = ReplyKeyboardMarkup(
@@ -148,6 +156,11 @@ def new_message(message: telebot.types.Message):
         menu(message)
     elif message.text == "🏦 Биржи":
         settings = db.get_settings(message.from_user.id)["birges"]
+        markup = ReplyKeyboardMarkup(
+            resize_keyboard=True,
+            one_time_keyboard=True,
+            row_width=3
+        )
         buttons = [KeyboardButton("✅ "+i if i in settings else "❌ "+i) for i in birges]
         markup.add(*buttons)
         tg.send_message(message.chat.id, "Выберите биржи:", reply_markup=markup)
@@ -163,10 +176,6 @@ def new_message(message: telebot.types.Message):
         db.set_settings(message.from_user.id, settings)
         tg.send_message(message.chat.id, f"Успешно удалена биржа {message.text[2:]}!")
         menu(message)
-    elif message.text == "Создать код регистрации" and db.is_admin(message.from_user.id):
-        key = codes.generate_invite()
-        tg.send_message(message.chat.id, f"Код: {key}")
-        menu(message)
     elif message.text == "👤 Личный кабинет":
         settings = db.get_settings(message.from_user.id)
         payment = db.get_payment(message.from_user.id)
@@ -175,12 +184,12 @@ def new_message(message: telebot.types.Message):
             ["Минимальный риск", "Сбалансированная", "Максимум прибыли"]
         ]
         tg.send_message(message.chat.id, f"""
-            👤 Личный кабинет
+👤 Личный кабинет
                         
-            🔑 Статус подписки: {str(payment)+" дней" if payment != 0 else "Не активна"}
-            💰 Объем сделки: {answers[0][settings["valuen"]]}
-            📈 Стратегия: {answers[1][settings["strategy"]]}
-            🏦 Активные биржи: {*settings["birges"],}
+🔑 Статус подписки: {str(payment)+" дней" if payment != 0 else "Не активна"}
+💰 Объем сделки: {answers[0][settings["valuen"]]}
+📈 Стратегия: {answers[1][settings["strategy"]]}
+🏦 Активные биржи: {*settings["birges"],}
         """)
         menu(message)
     elif message.text == "🚀 Начать поиск":
@@ -195,8 +204,8 @@ def new_message(message: telebot.types.Message):
         )
         markup.add(KeyboardButton("🛑 СТОП"))
         tg.send_message(message.chat.id, """
-            Поиск запущен! Связки будут приходить автоматически.
-            Используй 🛑 СТОП для паузы.
+Поиск запущен! Связки будут приходить автоматически.
+Используй 🛑 СТОП для паузы.
         """, reply_markup=markup)
     elif message.text == "🛑 СТОП":
         in_searching.remove({
@@ -205,14 +214,7 @@ def new_message(message: telebot.types.Message):
         })
         tg.send_message(message.chat.id, "Поиск остановлен!")
         menu(message)
-    elif codes.is_invite(message.text):
-        db.add_payment(message.from_user.id, 30)
-        tg.reply_to(message, "Вы зарегистрированы!")
-        menu(message)
-    elif codes.is_admin(message.text):
-        db.add_admin(message.text)
-        tg.reply_to(message, "Вы теперь администратор")
-        menu(message)
+    
 
 def bot_listener():
     while True:
@@ -244,7 +246,8 @@ def bot_counter():
 def bot_server():
     while True:
         try:
-            
+            pass
+        ######
         except Exception as e:
             print(f"Ошибка polling: {e}")
             time.sleep(10)
@@ -252,10 +255,10 @@ def bot_server():
 if __name__ == "__main__":
     th1 = threading.Thread(target=bot_listener, args=())
     th2 = threading.Thread(target=bot_counter, args=())
-    th3 = threading.Thread(target=bot_server, args=())
+    #th3 = threading.Thread(target=bot_server, args=())
     th1.start()
     th2.start()
-    th3.start()
+    #th3.start()
     th1.join()
     th2.join()
-    th3.join()
+    #th3.join()
