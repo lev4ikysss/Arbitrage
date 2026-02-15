@@ -172,7 +172,10 @@ class DataBase:
             SELECT day_payment FROM users
             WHERE user_id = ?
         """, (user_id,))
-        return self.cur.fetchone()[0]
+        try:
+            return self.cur.fetchone()[0]
+        except:
+            return -1
 
     def add_admin(self, user_id: int) -> None:
         """

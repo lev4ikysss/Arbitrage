@@ -49,6 +49,7 @@ def menu(message: telebot.types.Message):
 def start(message: telebot.types.Message):
     if not db.is_register(message.from_user.id):
         tg.reply_to(message, "Привет! Введи код регистрации для продолжения")
+        db.add_user(message.from_user.id, message.chat.id)
     elif not db.is_payment(message.from_user.id):
         tg.reply_to(message, "Введи код регистрации для продолжения")
     else:
@@ -57,6 +58,7 @@ def start(message: telebot.types.Message):
 @tg.message_handler(func=lambda message: True)
 def new_message(message: telebot.types.Message):
     if codes.is_invite(message.text):
+        db.add_user(message.from_user.id, message.chat.id)
         db.add_payment(message.from_user.id, 30)
         tg.reply_to(message, "Вы зарегистрированы!")
         menu(message)
