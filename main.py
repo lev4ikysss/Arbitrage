@@ -251,5 +251,11 @@ def bot_server():
 
 if __name__ == "__main__":
     th1 = threading.Thread(target=bot_listener, args=())
+    th2 = threading.Thread(target=bot_counter, args=())
+    th3 = threading.Thread(target=bot_server, args=())
     th1.start()
+    th2.start()
+    th3.start()
     th1.join()
+    th2.join()
+    th3.join()
