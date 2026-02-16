@@ -6,12 +6,14 @@ from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 from utils.settings import GetParams
 from utils.database import Codes
 from utils.database import DataBase
+from utils.birges import Request
 
 params = GetParams("config.conf")
 
 tg = telebot.TeleBot(params.token_tg)
 codes = Codes(params.codes_path)
 db = DataBase(params.db_path)
+rq = Request()
 birges = ["Bybit", "Mexc", "Gate", "HTX", "Bitmart", "Kucoin", "OKX", "Coinex", "Poloniex", "BingX"]
 bad_birges = ["❌ "+i for i in birges]
 good_birges = ["✅ "+i for i in birges]
@@ -245,22 +247,22 @@ def bot_counter():
             print(f"Ошибка polling: {e}")
             time.sleep(10)
 
-def bot_server():
+def birge_listener():
     while True:
         try:
-            pass
-        ######
+            
+            time.sleep(60)
         except Exception as e:
             print(f"Ошибка polling: {e}")
-            time.sleep(10)
+            time.sleep(120)
 
 if __name__ == "__main__":
     th1 = threading.Thread(target=bot_listener, args=())
     th2 = threading.Thread(target=bot_counter, args=())
-    #th3 = threading.Thread(target=bot_server, args=())
+    th3 = threading.Thread(target=birge_listener, args=())
     th1.start()
     th2.start()
-    #th3.start()
+    th3.start()
     th1.join()
     th2.join()
-    #th3.join()
+    th3.join()
