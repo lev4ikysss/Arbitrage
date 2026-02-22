@@ -246,5 +246,3 @@ class DataBase:
             WHERE user_id = ?
         """, (user_id,))
         return self.cur.fetchone()[0]
-    
-    

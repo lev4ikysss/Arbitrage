@@ -12,4 +12,3 @@ class GetParams:
         self.db_path = configuration["database"]["path"]
         self.codes_path = configuration["codes"]["path"]
         self.payment_warning = int(configuration["bot"]["payment_warning"])
-        
