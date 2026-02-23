@@ -39,10 +39,13 @@ class Request:
         answer = []
         for bind in check_binds:
             if "USDT" in bind["symbol"]:
-                answer.append({
-                    "coin": bind["symbol"].replace("USDT", ""),
-                    "price": bind["lastPrice"]
-                })            
+                try:
+                    answer.append({
+                        "coin": bind["symbol"].replace("USDT", ""),
+                        "price": float(bind["lastPrice"])
+                    })
+                except:
+                    pass      
         return answer
 
     def check_mexc(self) -> list:
@@ -53,10 +56,13 @@ class Request:
         answer = []
         for bind in check_binds:
             if "USDT" in bind["symbol"]:
-                answer.append({
-                    "coin": bind["symbol"].replace("USDT", ""),
-                    "price": bind["price"]
-                })
+                try:
+                    answer.append({
+                        "coin": bind["symbol"].replace("USDT", ""),
+                        "price": float(bind["price"])
+                    })
+                except:
+                    pass
         return answer
 
     def check_gate(self) -> list:
@@ -67,10 +73,13 @@ class Request:
         answer = []
         for bind in check_binds:
             if "USDT" in bind["currency_pair"]:
-                answer.append({
-                    "coin": bind["currency_pair"].replace("USDT", "").replace("_", ""),
-                    "price": bind["last"]
-                })
+                try:
+                    answer.append({
+                        "coin": bind["currency_pair"].replace("USDT", "").replace("_", ""),
+                        "price": float(bind["last"])
+                    })
+                except:
+                    pass
         return answer
 
     def check_htx(self) -> list:
@@ -81,10 +90,13 @@ class Request:
         answer = []
         for bind in check_binds:
             if "USDT" in bind["symbol"].upper():
-                answer.append({
-                    "coin": bind["symbol"].upper().replace("USDT", ""),
-                    "price": bind["close"]
-                })
+                try:
+                    answer.append({
+                        "coin": bind["symbol"].upper().replace("USDT", ""),
+                        "price": float(bind["close"])
+                    })
+                except:
+                    pass
         return answer
 
     def check_bitmart(self) -> list:
@@ -95,10 +107,13 @@ class Request:
         answer = []
         for bind in check_binds:
             if "USDT" in bind[0]:
-                answer.append({
-                    "coin": bind[0].replace("USDT", "").replace("_", ""),
-                    "price": bind[1]
-                })
+                try:
+                    answer.append({
+                        "coin": bind[0].replace("USDT", "").replace("_", ""),
+                        "price": float(bind[1])
+                    })
+                except:
+                    pass
         return answer
 
     def check_kucoin(self) -> list:
@@ -109,10 +124,13 @@ class Request:
         answer = []
         for bind in check_binds:
             if "USDT" in bind["symbol"]:
-                answer.append({
-                    "coin": bind["symbol"].replace("USDT", "").replace("-", ""),
-                    "price": bind["last"]
-                })
+                try:
+                    answer.append({
+                        "coin": bind["symbol"].replace("USDT", "").replace("-", ""),
+                        "price": float(bind["last"])
+                    })
+                except:
+                    pass
         return answer
 
     def check_okx(self) -> list:
@@ -123,10 +141,13 @@ class Request:
         answer = []
         for bind in check_binds:
             if "USDT" in bind["instId"]:
-                answer.append({
-                    "coin": bind["instId"].replace("USDT", "").replace("-", ""),
-                    "price": bind["last"]
-                })
+                try:
+                    answer.append({
+                        "coin": bind["instId"].replace("USDT", "").replace("-", ""),
+                        "price": float(bind["last"])
+                    })
+                except:
+                    pass
         return answer
 
     def check_coinex(self) -> list:
@@ -137,10 +158,13 @@ class Request:
         answer = []
         for bind in check_binds.keys():
             if "USDT" in bind:
-                answer.append({
-                    "coin": bind.replace("USDT", ""),
-                    "price": check_binds[bind]["last"]
-                })
+                try:
+                    answer.append({
+                        "coin": bind.replace("USDT", ""),
+                        "price": float(check_binds[bind]["last"])
+                    })
+                except:
+                    pass
         return answer
 
     def check_poloniex(self) -> list:
@@ -151,10 +175,13 @@ class Request:
         answer = []
         for bind in check_binds:
             if "USDT" in bind["symbol"]:
-                answer.append({
-                    "coin": bind["symbol"].replace("USDT", "").replace("_", ""),
-                    "price": bind["price"]
-                })
+                try:
+                    answer.append({
+                        "coin": bind["symbol"].replace("USDT", "").replace("_", ""),
+                        "price": float(bind["price"])
+                    })
+                except:
+                    pass
         return answer
 
     def check_bingx(self) -> list:
@@ -165,10 +192,13 @@ class Request:
         answer = []
         for bind in check_binds:
             if "USDT" in bind["symbol"]:
-                answer.append({
-                    "coin": bind["symbol"].replace("USDT", "").replace("-", ""),
-                    "price": bind["lastPrice"]
-                })
+                try:
+                    answer.append({
+                        "coin": bind["symbol"].replace("USDT", "").replace("-", ""),
+                        "price": float(bind["lastPrice"])
+                    })
+                except:
+                    pass
         return answer
 
     def check_all(self) -> dict:
@@ -176,14 +206,35 @@ class Request:
             Получает данные о стоимости токенов относительно USDT, по вем биржам
         """
         return {
-            "bybit": self.check_bybit(),
-            "mexc": self.check_mexc(),
-            "gate": self.check_gate(),
-            "htx": self.check_htx(),
-            "bitmart": self.check_bitmart(),
-            "kucoin": self.check_kucoin(),
-            "okx": self.check_okx(),
-            "coinex": self.check_coinex(),
-            "poloniex": self.check_poloniex(),
-            "bingx": self.check_bingx()
+            "Bybit": self.check_bybit(),
+            "Mexc": self.check_mexc(),
+            "Gate": self.check_gate(),
+            "HTX": self.check_htx(),
+            "Bitmart": self.check_bitmart(),
+            "Kucoin": self.check_kucoin(),
+            "OKX": self.check_okx(),
+            "Coinex": self.check_coinex(),
+            "Poloniex": self.check_poloniex(),
+            "BingX": self.check_bingx()
         }
+
+    @staticmethod
+    def restructurize_birges(birges: dict) -> dict:
+        """
+            Реструктуризирует биржи в лучший вид
+        """
+        answer = {}
+        for key in birges.keys():
+            for i in birges[key]:
+                try:
+                    answer[i["coin"]].append({
+                        "birge": key,
+                        "price": i["price"]
+                    })
+                except:
+                    answer[i["coin"]] = []
+                    answer[i["coin"]].append({
+                        "birge": key,
+                        "price": i["price"]
+                    })
+        return answer
