@@ -167,19 +167,33 @@ def new_message(message: telebot.types.Message):
             row_width=3
         )
         buttons = [KeyboardButton("✅ "+i if i in settings else "❌ "+i) for i in birges]
-        markup.add(*buttons)
+        markup.add(*buttons, KeyboardButton("Вернуться в меню"))
         tg.send_message(message.chat.id, "Выберите биржи:", reply_markup=markup)
     elif message.text in bad_birges:
         settings = db.get_settings(message.from_user.id)
         settings["birges"].append(message.text[2:])
         db.set_settings(message.from_user.id, settings)
-        tg.send_message(message.chat.id, f"Успешно добавлена биржа {message.text[2:]}!")
-        menu(message)
+        markup = ReplyKeyboardMarkup(
+            resize_keyboard=True,
+            one_time_keyboard=True,
+            row_width=3
+        )
+        buttons = [KeyboardButton("✅ "+i if i in settings["birges"] else "❌ "+i) for i in birges]
+        markup.add(*buttons, KeyboardButton("Вернуться в меню"))
+        tg.send_message(message.chat.id, f"Успешно добавлена биржа {message.text[2:]}!", reply_markup=markup)
     elif message.text in good_birges:
         settings = db.get_settings(message.from_user.id)
         settings["birges"].remove(message.text[2:])
         db.set_settings(message.from_user.id, settings)
-        tg.send_message(message.chat.id, f"Успешно удалена биржа {message.text[2:]}!")
+        markup = ReplyKeyboardMarkup(
+            resize_keyboard=True,
+            one_time_keyboard=True,
+            row_width=3
+        )
+        buttons = [KeyboardButton("✅ "+i if i in settings["birges"] else "❌ "+i) for i in birges]
+        markup.add(*buttons, KeyboardButton("Вернуться в меню"))
+        tg.send_message(message.chat.id, f"Успешно удалена биржа {message.text[2:]}!", reply_markup=markup)
+    elif message.text == "Вернуться в меню":
         menu(message)
     elif message.text == "👤 Личный кабинет":
         settings = db.get_settings(message.from_user.id)
@@ -250,70 +264,58 @@ def bot_counter():
             time.sleep(10)
 
 def birge_listener():
+    last_sent = {}
     while True:
         try:
             tokens = rq.restructurize_birges(rq.check_all())
-            messages = []
-            for coin, birges in tokens.items():
-                if len(birges) < 2:
+            for user in in_searching[:]:
+                user_id = user["user_id"]
+                chat_id = user["chat_id"]
+                if user_id in last_sent and time.time() - last_sent[user_id] < 300:
                     continue
-
-                birges = sorted(birges, key=lambda x: x["price"])
-                buy_price  = birges[0]["price"]
-                buy_birge  = birges[0]["birge"]
-                sell_price = birges[-1]["price"]
-                sell_birge = birges[-1]["birge"]
-
-                if buy_price < 0.00000001 or sell_price < 0.00000001:
+                try:
+                    settings = db.get_settings(user_id)
+                except:
                     continue
-                spred = (sell_price - buy_price) / buy_price * 100
-                if spred < 0.3:
+                active_birges = set(settings.get("birges", []))
+                if len(active_birges) < 2:
                     continue
-
-                messages.append({
-                    "bundle": f"{coin}/USDT",
-                    "spred": spred,
-                    "buy_birge": buy_birge,
-                    "sell_birge": sell_birge,
-                    "buy_price": buy_price,
-                    "sell_price": sell_price
-                })
-            for message in messages:
-                for user in in_searching[:]:
-                    try:
-                        settings = db.get_settings(user["user_id"])
-                    except:
+                volume_usdt = [75, 300, 750][settings.get("valuen", 1)]
+                strategy    = settings.get("strategy", 1)
+                min_spred_strategy = [3.75, 1.1, 0.6][strategy]
+                sent_count = 0
+                for coin, all_birges in tokens.items():
+                    if sent_count >= 5:
+                        break
+                    user_birges = [b for b in all_birges if b["birge"] in active_birges]
+                    if len(user_birges) < 2:
                         continue
-                    
-                    active_birges = set(settings.get("birges", []))
-                    if message["buy_birge"] not in active_birges or message["sell_birge"] not in active_birges:
+                    user_birges = sorted(user_birges, key=lambda x: x["price"])
+                    buy_price  = user_birges[0]["price"]
+                    buy_birge  = user_birges[0]["birge"]
+                    sell_price = user_birges[-1]["price"]
+                    sell_birge = user_birges[-1]["birge"]
+                    if buy_price < 0.00000001 or sell_price < 0.00000001:
                         continue
-
-                    volume_usdt = [75, 300, 750][settings.get("valuen", 1)]
-                    buy_amount_tokens = volume_usdt / message["buy_price"]
-                    sell_amount_usdt  = buy_amount_tokens * message["sell_price"]
-                    gross_profit      = sell_amount_usdt - volume_usdt
-                    
-                    fee_pct   = 0.001
+                    spred = (sell_price - buy_price) / buy_price * 100
+                    if spred < 0.3 or spred > 500:
+                        continue
+                    buy_amount_tokens = volume_usdt / buy_price
+                    sell_amount_usdt = buy_amount_tokens * sell_price
+                    gross_profit = sell_amount_usdt - volume_usdt
+                    fee_pct = 0.01
                     fee_fixed = 1.0
                     total_fees = (volume_usdt * fee_pct * 2) + (fee_fixed * 2)
-                    
                     net_profit = gross_profit - total_fees
-                    
-                    valuen = settings["valuen"]
-                    strategy = settings["strategy"]
-                    
-                    min_spred_valuen  = [2.5, 1.0, 0.6][valuen]
-                    min_profit_valuen = [1.75, 4.0, 9.0][valuen]
-                    min_spred_strategy = [3.75, 1.1, 0.6][strategy]
-
+                    min_spred_valuen = [2.5, 1.0, 0.6][settings["valuen"]]
+                    min_profit_valuen = [1.75, 4.0, 9.0][settings["valuen"]]
                     if (spred >= min_spred_valuen and net_profit >= min_profit_valuen) and \
                        (spred >= min_spred_strategy):
                         msg = f"""
-🔄 Связка: {message["bundle"]}
+🔄 Связка: {coin}/USDT
 
-📊 Купить на {message["buy_birge"]}: Цена {message["buy_price"]:g}$
-📊 Продать на {message["sell_birge"]}: Цена {message["sell_price"]:g}$
+📊 Купить на {buy_birge}: Цена {buy_price:.8g}$
+📊 Продать на {sell_birge}: Цена {sell_price:.8g}$
 
 💼 Объём: {volume_usdt}$
 📈 Спред: {spred:.2f}%
@@ -321,18 +323,41 @@ def birge_listener():
 ⏳ Время жизни: ~5 мин
 
 🔗 Сеть: TRC20
-Комиссия: 0.1% + 1$
+Комиссия: 1% + 1$
 Контракт проверен ✅
 
 ⚠️ РИСК: Проверь стакан и адреса! Не меняй сеть!
                         """.strip()
+                        msg = msg.replace("Bybit", f'<a href="https://www.bybit.com/ru-RU/trade/spot/{coin}/USDT">Bybit</a>')
+                        msg = msg.replace("Mexc", f'<a href="https://www.mexc.com/ru-RU/exchange/{coin}_USDT?_from=market">Mexc</a>')
+                        msg = msg.replace("Gate", f'<a href="https://www.gate.com/ru/trade/{coin}_USDT">Gate</a>')
+                        msg = msg.replace("HTX", f'<a href="https://www.htx.com/trade/{coin.lower()}_usdt?type=spot">HTX</a>')
+                        msg = msg.replace("Bitmart", f'<a href="https://www.bitmart.com/ru-RU/trade/{coin}_USDT?type=spot">Bitmart</a>')
+                        msg = msg.replace("Kucoin", f'<a href="https://www.kucoin.com/trade/{coin}-USDT">Kucoin</a>')
+                        msg = msg.replace("OKX", f'<a href="https://www.okx.com/ru/trade-spot/{coin.lower()}-usdt">OKX</a>')
+                        msg = msg.replace("Coinex", f'<a href="https://www.coinex.com/ru/exchange/{coin.lower()}-usdt">Coinex</a>')
+                        msg = msg.replace("Poloniex", f'<a href="https://www.poloniex.com/ru/trade/{coin}_USDT">Poloniex</a>')
+                        msg = msg.replace("BingX", f'<a href="https://bingx.com/en/spot/{coin}USDT">BingX</a>')
                         try:
-                            tg.send_message(user["chat_id"], msg)
-                            time.sleep(5)
-                        except Exception as e:
-                            print(f"Ошибка отправки {user['user_id']}: {e}")
-                            if "blocked" in str(e).lower():
+                            tg.send_message(
+                                chat_id,
+                                msg,
+                                parse_mode="HTML",
+                                disable_web_page_preview=True
+                            )
+                            sent_count += 1
+                            last_sent[user_id] = time.time()
+                            time.sleep(1.5)
+                        except telebot.apihelper.ApiTelegramException as e:
+                            if e.error_code == 429:
+                                retry_after = e.result_json.get("parameters", {}).get("retry_after", 30)
+                                print(f"Rate limit для {user_id}. Ждём {retry_after} сек")
+                                time.sleep(retry_after + 2)
+                            elif "blocked" in str(e).lower() or "forbidden" in str(e).lower():
+                                print(f"Пользователь {user_id} заблокировал бота — удаляем")
                                 in_searching.remove(user)
+                            else:
+                                print(f"Другая ошибка отправки {user_id}: {e}")
             time.sleep(300)
         except Exception as e:
             print(f"Ошибка birge_listener: {e}")
