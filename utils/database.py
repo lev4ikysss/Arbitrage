@@ -105,7 +105,7 @@ class DataBase:
                 UPDATE users
                 SET settings = ?
                 WHERE settings = '{}'
-            """, (json.dumps({"valuen": 0, "strategy": 1, "birges": ["Bybit", "Mexc", "Gate", "HTX", "Bitmart", "Kucoin", "OKX", "Coinex", "Poloniex", "BingX"]}, ensure_ascii=False),))
+            """, (json.dumps({"valuen": 100, "strategy": 1, "birges": ["Bybit", "Mexc", "Gate", "HTX", "Bitmart", "Kucoin", "OKX", "Coinex", "Poloniex", "BingX"]}, ensure_ascii=False),))
             self.con.commit()
         except:
             return 1

@@ -19,6 +19,7 @@ birges = ["Bybit", "Mexc", "Gate", "HTX", "Bitmart", "Kucoin", "OKX", "Coinex", 
 bad_birges = ["❌ "+i for i in birges]
 good_birges = ["✅ "+i for i in birges]
 
+actions = {}
 with open('data/listeners.json', 'r') as f: in_searching = json.load(f)
 
 def menu(message: telebot.types.Message):
@@ -100,34 +101,17 @@ def new_message(message: telebot.types.Message):
         tg.send_message(message.chat.id, """⚠️ Риски: не меняй адреса! Проверяй ссылки. Используй лимитные ордера.""")
         menu(message)
     elif message.text == "💰 Объем сделки":
-        markup = ReplyKeyboardMarkup(
-            resize_keyboard=True,
-            one_time_keyboard=True,
-            row_width=1
-        )
-        markup.add(
-            KeyboardButton("10-100$"),
-            KeyboardButton("100-500$"),
-            KeyboardButton("500-1000$")
-        )
-        tg.send_message(message.chat.id, "Выберите объем:", reply_markup=markup)
-    elif message.text == "10-100$":
+        tg.send_message(message.chat.id, "Напишите ваш объём сделки (число):")
+        actions[str(message.from_user.id)] = {
+            "chat_id": message.chat.id,
+            "action": 0
+        }
+    elif message.from_user.id in list(map(int, actions.keys())):
         settings = db.get_settings(message.from_user.id)
-        settings["valuen"] = 0
+        settings["valuen"] = int(message.text)
         db.set_settings(message.from_user.id, settings)
-        tg.send_message(message.chat.id, "Успешно изменено!")
-        menu(message)
-    elif message.text == "100-500$":
-        settings = db.get_settings(message.from_user.id)
-        settings["valuen"] = 1
-        db.set_settings(message.from_user.id, settings)
-        tg.send_message(message.chat.id, "Успешно изменено!")
-        menu(message)
-    elif message.text == "500-1000$":
-        settings = db.get_settings(message.from_user.id)
-        settings["valuen"] = 2
-        db.set_settings(message.from_user.id, settings)
-        tg.send_message(message.chat.id, "Успешно изменено!")
+        tg.send_message(message.chat.id, "Успешно!")
+        actions.pop(str(message.from_user.id))
         menu(message)
     elif message.text == "📈 Стратегия":
         markup = ReplyKeyboardMarkup(
@@ -198,16 +182,13 @@ def new_message(message: telebot.types.Message):
     elif message.text == "👤 Личный кабинет":
         settings = db.get_settings(message.from_user.id)
         payment = db.get_payment(message.from_user.id)
-        answers = [
-            ["10-100$", "100-500$", "500-1000$"],
-            ["Минимальный риск", "Сбалансированная", "Максимум прибыли"]
-        ]
+        answers = ["Минимальный риск", "Сбалансированная", "Максимум прибыли"]
         tg.send_message(message.chat.id, f"""
 👤 Личный кабинет
                         
 🔑 Статус подписки: {str(payment)+" дней" if payment != 0 else "Не активна"}
-💰 Объем сделки: {answers[0][settings["valuen"]]}
-📈 Стратегия: {answers[1][settings["strategy"]]}
+💰 Объем сделки: {settings["valuen"]}
+📈 Стратегия: {answers[settings["strategy"]]}
 🏦 Активные биржи: {*settings["birges"],}
         """)
         menu(message)
@@ -280,8 +261,8 @@ def birge_listener():
                 active_birges = set(settings.get("birges", []))
                 if len(active_birges) < 2:
                     continue
-                volume_usdt = [75, 300, 750][settings.get("valuen", 1)]
-                strategy    = settings.get("strategy", 1)
+                volume_usdt = settings["valuen"]
+                strategy = settings.get("strategy", 1)
                 min_spred_strategy = [3.75, 1.1, 0.6][strategy]
                 sent_count = 0
                 for coin, all_birges in tokens.items():
@@ -307,8 +288,8 @@ def birge_listener():
                     fee_fixed = 1.0
                     total_fees = (volume_usdt * fee_pct * 2) + (fee_fixed * 2)
                     net_profit = gross_profit - total_fees
-                    min_spred_valuen = [2.5, 1.0, 0.6][settings["valuen"]]
-                    min_profit_valuen = [1.75, 4.0, 9.0][settings["valuen"]]
+                    min_spred_valuen = [2.5, 1.0, 0.6][settings["strategy"]]
+                    min_profit_valuen = [1.75, 4.0, 9.0][settings["strategy"]]
                     if (spred >= min_spred_valuen and net_profit >= min_profit_valuen) and \
                        (spred >= min_spred_strategy):
                         msg = f"""
