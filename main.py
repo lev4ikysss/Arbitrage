@@ -221,7 +221,6 @@ def new_message(message: telebot.types.Message):
         with open('data/listeners.json', 'w') as f: json.dump(in_searching, f, indent=4)
         tg.send_message(message.chat.id, "Поиск остановлен!")
         menu(message)
-    
 
 def bot_listener():
     while True:
@@ -313,8 +312,8 @@ def birge_listener():
                         msg = f"""
 🔄 Связка: {message["bundle"]}
 
-📊 Купить на {message["buy_birge"]}: Цена {message["buy_price"]:.8f}$
-📊 Продать на {message["sell_birge"]}: Цена {message["sell_price"]:.8f}$
+📊 Купить на {message["buy_birge"]}: Цена {message["buy_price"]:g}$
+📊 Продать на {message["sell_birge"]}: Цена {message["sell_price"]:g}$
 
 💼 Объём: {volume_usdt}$
 📈 Спред: {spred:.2f}%
@@ -329,7 +328,7 @@ def birge_listener():
                         """.strip()
                         try:
                             tg.send_message(user["chat_id"], msg)
-                            time.sleep(2)
+                            time.sleep(5)
                         except Exception as e:
                             print(f"Ошибка отправки {user['user_id']}: {e}")
                             if "blocked" in str(e).lower():
