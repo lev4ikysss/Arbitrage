@@ -189,7 +189,7 @@ def new_message(message: telebot.types.Message):
 🔑 Статус подписки: {str(payment)+" дней" if payment != 0 else "Не активна"}
 💰 Объем сделки: {settings["valuen"]}
 📈 Стратегия: {answers[settings["strategy"]]}
-🏦 Активные биржи: {*settings["birges"],}
+🏦 Активные биржи: {', '.join(settings["birges"])}
         """)
         menu(message)
     elif message.text == "🚀 Начать поиск":
