@@ -1,0 +1,36 @@
+[Unit]
+Description=Crypto Arbitrage Scanner Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+
+WorkingDirectory=/etc/crypto-arbitrage-bot
+
+ExecStart=/etc/crypto-arbitrage-bot/.venv/bin/python3 /etc/crypto-arbitrage-bot/main.py
+
+Restart=always
+RestartSec=7
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+MemoryMax=800M
+CPUQuota=60%
+
+StandardOutput=journal
+StandardError=journal
+
+ReadWritePaths=/etc/crypto-arbitrage-bot/data
+
+[Install]
+WantedBy=multi-user.target
