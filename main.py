@@ -101,14 +101,20 @@ def new_message(message: telebot.types.Message):
         tg.send_message(message.chat.id, """⚠️ Риски: не меняй адреса! Проверяй ссылки. Используй лимитные ордера.""")
         menu(message)
     elif message.text == "💰 Объем сделки":
-        tg.send_message(message.chat.id, "Напишите ваш объём сделки (число):")
+        tg.send_message(message.chat.id, "Напишите ваш минимум объём сделки (число):")
         actions[str(message.from_user.id)] = {
             "chat_id": message.chat.id,
             "action": 0
         }
-    elif message.from_user.id in list(map(int, actions.keys())):
+    elif str(message.from_user.id) in actions.keys() and actions[str(message.from_user.id)]["action"] == 0:
         settings = db.get_settings(message.from_user.id)
-        settings["valuen"] = int(message.text)
+        settings["valuen-min"] = int(message.text)
+        db.set_settings(message.from_user.id, settings)
+        tg.send_message(message.chat.id, "Напишите ваш максимум объём сделки (число):")
+        actions[str(message.from_user.id)]["action"] = 1
+    elif str(message.from_user.id) in actions.keys() and actions[str(message.from_user.id)]["action"] == 1:
+        settings = db.get_settings(message.from_user.id)
+        settings["valuen-max"] = int(message.text)
         db.set_settings(message.from_user.id, settings)
         tg.send_message(message.chat.id, "Успешно!")
         actions.pop(str(message.from_user.id))
@@ -187,7 +193,7 @@ def new_message(message: telebot.types.Message):
 👤 Личный кабинет
                         
 🔑 Статус подписки: {str(payment)+" дней" if payment != 0 else "Не активна"}
-💰 Объем сделки: {settings["valuen"]}
+💰 Объем сделки: ${settings["valuen-min"]}-{settings["valuen-max"]}
 📈 Стратегия: {answers[settings["strategy"]]}
 🏦 Активные биржи: {', '.join(settings["birges"])}
         """)
@@ -246,69 +252,140 @@ def bot_counter():
 
 def birge_listener():
     last_sent = {}
+    MAX_SENT_PER_CYCLE = 5
+    COOLDOWN_SEC = 300
+    SLIPPAGE_PCT = 0.3
+    SAFETY_FACTOR = 0.7
+
     while True:
         try:
             tokens = rq.restructurize_birges(rq.check_all())
+            print(f"Получено {len(tokens)} монет с котировками")  # отладка
+
             for user in in_searching[:]:
                 user_id = user["user_id"]
                 chat_id = user["chat_id"]
-                if user_id in last_sent and time.time() - last_sent[user_id] < 300:
+
+                if user_id in last_sent and time.time() - last_sent[user_id] < COOLDOWN_SEC:
                     continue
+
                 try:
                     settings = db.get_settings(user_id)
-                except:
+                except Exception as e:
+                    print(f"Не удалось получить настройки {user_id}: {e}")
                     continue
+
                 active_birges = set(settings.get("birges", []))
                 if len(active_birges) < 2:
                     continue
-                volume_usdt = settings["valuen"]
+
+                user_min_vol = settings.get("valuen-min", 10)
+                user_max_vol = settings.get("valuen-max", 1000)
                 strategy = settings.get("strategy", 1)
-                min_spred_strategy = [3.75, 1.1, 0.6][strategy]
+
+                strategy_mult = [0.6, 1.0, 1.4][strategy]
+                base_vol = (user_min_vol + user_max_vol) / 2
+                max_allowed_vol = min(user_max_vol * strategy_mult, user_max_vol)
+
                 sent_count = 0
+
                 for coin, all_birges in tokens.items():
-                    if sent_count >= 5:
+                    if sent_count >= MAX_SENT_PER_CYCLE:
                         break
+
                     user_birges = [b for b in all_birges if b["birge"] in active_birges]
                     if len(user_birges) < 2:
                         continue
+
                     user_birges = sorted(user_birges, key=lambda x: x["price"])
+
                     buy_price  = user_birges[0]["price"]
                     buy_birge  = user_birges[0]["birge"]
                     sell_price = user_birges[-1]["price"]
                     sell_birge = user_birges[-1]["birge"]
-                    if buy_price < 0.00000001 or sell_price < 0.00000001:
+
+                    if buy_price < 1e-8 or sell_price < 1e-8:
                         continue
+
                     spred = (sell_price - buy_price) / buy_price * 100
-                    if spred < 0.3 or spred > 500:
+
+                    # Временно слабляем фильтр для теста (потом вернёшь)
+                    if spred < 0.3 or spred > 100:  # было 0.3 — снизили до 0.15%
                         continue
+
+                    print(f"Потенциальная связка {coin}: спред {spred:.2f}% на {buy_birge} → {sell_birge}")
+
+                    # === Пытаемся получить стакан ===
+                    depth_buy_usdt = depth_sell_usdt = 0
+                    volume_usdt = base_vol * strategy_mult  # fallback
+                    volume_usdt = max(user_min_vol, min(volume_usdt, user_max_vol))
+
+                    try:
+                        depth_data = rq.get_depth(
+                            base_token=coin,
+                            quote_token="USDT",
+                            exchanges=[buy_birge, sell_birge]
+                        )
+
+                        buy_info  = depth_data.get("buy_exchange",  {})
+                        sell_info = depth_data.get("sell_exchange", {})
+
+                        if buy_info.get("success") and sell_info.get("success"):
+                            depth_buy_usdt  = buy_info.get("depth_buy_usdt",  0)
+                            depth_sell_usdt = sell_info.get("depth_sell_usdt", 0)
+                            safe_volume = min(depth_buy_usdt, depth_sell_usdt) * SAFETY_FACTOR
+
+                            # Реальный объём = минимум из стакана и лимитов пользователя
+                            volume_usdt = min(safe_volume, max_allowed_vol)
+                            volume_usdt = max(volume_usdt, user_min_vol)
+
+                            print(f"  → стакан OK, volume={volume_usdt:.1f}$ (buy:{depth_buy_usdt:.0f}, sell:{depth_sell_usdt:.0f})")
+
+                        else:
+                            print(f"  → стакан не получен, использую fallback {volume_usdt:.1f}$")
+
+                    except Exception as e:
+                        print(f"  → ошибка get_depth для {coin}: {e}")
+
+                    if volume_usdt < user_min_vol * 0.5:
+                        print(f"  → объём слишком мал ({volume_usdt:.1f}$), пропуск")
+                        continue
+
+                    # Расчёт прибыли
                     buy_amount_tokens = volume_usdt / buy_price
-                    sell_amount_usdt = buy_amount_tokens * sell_price
-                    gross_profit = sell_amount_usdt - volume_usdt
-                    fee_pct = 0.01
+                    sell_amount_usdt  = buy_amount_tokens * sell_price
+                    gross_profit      = sell_amount_usdt - volume_usdt
+
+                    fee_pct   = 0.005   # 0.5%
                     fee_fixed = 1.0
                     total_fees = (volume_usdt * fee_pct * 2) + (fee_fixed * 2)
                     net_profit = gross_profit - total_fees
-                    min_spred_valuen = [2.5, 1.0, 0.6][settings["strategy"]]
-                    min_profit_valuen = [1.75, 4.0, 9.0][settings["strategy"]]
+
+                    min_spred_strategy = [3.75, 1.1, 0.6][strategy]
+                    min_spred_valuen   = [1.0, 0.4, 0.2][settings["strategy"]]
+                    min_profit_valuen  = [0.5, 2.0, 5.0][settings["strategy"]]
+
                     if (spred >= min_spred_valuen and net_profit >= min_profit_valuen) and \
                        (spred >= min_spred_strategy):
+
                         msg = f"""
 🔄 Связка: {coin}/USDT
 
-📊 Купить на {buy_birge}: Цена {buy_price:.8g}$
-📊 Продать на {sell_birge}: Цена {sell_price:.8g}$
+📊 Купить на {buy_birge}: {buy_price:.8g}$
+📊 Продать на {sell_birge}: {sell_price:.8g}$
 
-💼 Объём: {volume_usdt}$
+💼 Объём: {volume_usdt:.0f}$
 📈 Спред: {spred:.2f}%
 💰 Чистая прибыль: {net_profit:.2f}$
 ⏳ Время жизни: ~5 мин
 
 🔗 Сеть: TRC20
-Комиссия: 1% + 1$
+Комиссия: {fee_pct*100:.2f}% + 1$
 Контракт проверен ✅
 
-⚠️ РИСК: Проверь стакан и адреса! Не меняй сеть!
+⚠️ РИСК: Проверь стакан и адреса!
                         """.strip()
+
                         msg = msg.replace("Bybit", f'<a href="https://www.bybit.com/ru-RU/trade/spot/{coin}/USDT">Bybit</a>')
                         msg = msg.replace("Mexc", f'<a href="https://www.mexc.com/ru-RU/exchange/{coin}_USDT?_from=market">Mexc</a>')
                         msg = msg.replace("Gate", f'<a href="https://www.gate.com/ru/trade/{coin}_USDT">Gate</a>')
@@ -319,6 +396,7 @@ def birge_listener():
                         msg = msg.replace("Coinex", f'<a href="https://www.coinex.com/ru/exchange/{coin.lower()}-usdt">Coinex</a>')
                         msg = msg.replace("Poloniex", f'<a href="https://www.poloniex.com/ru/trade/{coin}_USDT">Poloniex</a>')
                         msg = msg.replace("BingX", f'<a href="https://bingx.com/en/spot/{coin}USDT">BingX</a>')
+
                         try:
                             tg.send_message(
                                 chat_id,
@@ -326,22 +404,20 @@ def birge_listener():
                                 parse_mode="HTML",
                                 disable_web_page_preview=True
                             )
+                            print(f"Сообщение отправлено {user_id} по {coin}")
                             sent_count += 1
                             last_sent[user_id] = time.time()
                             time.sleep(1.5)
-                        except telebot.apihelper.ApiTelegramException as e:
-                            if e.error_code == 429:
-                                retry_after = e.result_json.get("parameters", {}).get("retry_after", 30)
-                                print(f"Rate limit для {user_id}. Ждём {retry_after} сек")
-                                time.sleep(retry_after + 2)
-                            elif "blocked" in str(e).lower() or "forbidden" in str(e).lower():
-                                print(f"Пользователь {user_id} заблокировал бота — удаляем")
-                                in_searching.remove(user)
-                            else:
-                                print(f"Другая ошибка отправки {user_id}: {e}")
+
+                        except Exception as e:
+                            print(f"Ошибка отправки {user_id} по {coin}: {e}")
+                            if "429" in str(e):
+                                time.sleep(30)
+
             time.sleep(300)
+
         except Exception as e:
-            print(f"Ошибка birge_listener: {e}")
+            print(f"Глобальная ошибка birge_listener: {e}")
             rq.reconect()
             time.sleep(600)
 
