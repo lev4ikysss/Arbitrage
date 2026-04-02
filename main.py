@@ -13,6 +13,7 @@ from utils.birges import (
     close_all_sessions, OrderBook, get_all_symbols, get_universal_symbols,
     BIRGA_REGISTRY
 )
+from utils.blockchain import get_blockchain_info
 
 params = GetParams("config.conf")
 
@@ -32,7 +33,9 @@ ALL_ARBITRAGE_PAIRS: list[str] = []
 def format_notification(pair: str, buy_ob: OrderBook, sell_ob: OrderBook,
                         buy_exchange: str, sell_exchange: str,
                         volume: float, spread: float,
-                        net_profit: float, lifetime_hours: float) -> str:
+                        net_profit: float, lifetime_hours: float,
+                        lifetime_seconds: float = None,
+                        blockchain_info: dict = None) -> str:
     """Форматирует уведомление о арбитражной связке"""
 
     def format_orders(ob: OrderBook) -> str:
@@ -52,6 +55,29 @@ def format_notification(pair: str, buy_ob: OrderBook, sell_ob: OrderBook,
 
     base = pair.split('/')[0]
 
+    # Формируем информацию о сети
+    if blockchain_info:
+        confirmations = getattr(blockchain_info, "confirmations", 6)
+        block_time = getattr(blockchain_info, "avg_block_time", 15)
+        is_native = getattr(blockchain_info, "is_native", True)
+        network_name = getattr(blockchain_info, "name", "N/A")
+        confirm_time_minutes = (confirmations * block_time) / 60
+        if confirm_time_minutes < 1:
+            confirm_time_str = f"~ {int(confirm_time_minutes * 60)} сек"
+        elif confirm_time_minutes < 60:
+            confirm_time_str = f"~ {int(confirm_time_minutes)} мин"
+        else:
+            hours = int(confirm_time_minutes / 60)
+            mins = int(confirm_time_minutes % 60)
+            confirm_time_str = f"~ {hours}ч {mins}м"
+        contract_label = "нативная монета" if is_native else f"контракт ({network_name})"
+        blockchain_line = f"🔐 Подтверждений: {confirmations} | {confirm_time_str} (block time {block_time:.0f}с)"
+    else:
+        confirmations = 6
+        block_time = 15
+        contract_label = "нативная монета"
+        blockchain_line = "🔐 Количество подтверждений: 6 | ~ 6 подтверждений (block time N/A)"
+
     return f"""💠 {pair}
 
 🔹 Купить → {buy_exchange} (<a href="{buy_trade_url}">торговля</a>) | <a href="{buy_withdraw_url}">вывод</a>
@@ -64,12 +90,12 @@ def format_notification(pair: str, buy_ob: OrderBook, sell_ob: OrderBook,
 💰 Объём: {volume:.2f} USDT
 📊 Спред: {spread:.2f}%
 📈 Чистая прибыль: {net_profit:.3f} USDT
-⏱️ Время жизни связки: {int(lifetime_hours)}ч {int((lifetime_hours % 1) * 60)}м
+⏱️ Время жизни связки: {int(lifetime_seconds // 60)}м {int(lifetime_seconds % 60)}с
 
 
 🔗 Сети: {base} - вывод ✅, депозит ✅
-🏷️ Контракт: нативная монета
-🔐 Количество подтверждений: 6 | ~ 6 подтверждений (block time N/A)
+🏷️ Контракт: {contract_label}
+{blockchain_line}
 💸 Комиссии: B – {volume * 0.001:.3f} USDT, S – {volume * 0.001:.3f} USDT, W – {volume * 0.0001:.6f} USDT (сеть {base})"""
 
 
@@ -212,18 +238,30 @@ def new_message(message: telebot.types.Message):
             "action": 0
         }
     elif str(message.from_user.id) in actions.keys() and actions[str(message.from_user.id)]["action"] == 0:
+        try:
+            vol = int(message.text)
+        except ValueError:
+            tg.send_message(message.chat.id, "Введите число!")
+            return
         settings = db.get_settings(message.from_user.id)
-        settings["valuen-min"] = int(message.text)
+        settings["valuen-min"] = vol
         db.set_settings(message.from_user.id, settings)
         tg.send_message(message.chat.id, "Напишите ваш максимум объём сделки (число):")
         actions[str(message.from_user.id)]["action"] = 1
+        return
     elif str(message.from_user.id) in actions.keys() and actions[str(message.from_user.id)]["action"] == 1:
+        try:
+            vol = int(message.text)
+        except ValueError:
+            tg.send_message(message.chat.id, "Введите число!")
+            return
         settings = db.get_settings(message.from_user.id)
-        settings["valuen-max"] = int(message.text)
+        settings["valuen-max"] = vol
         db.set_settings(message.from_user.id, settings)
         tg.send_message(message.chat.id, "Успешно!")
         actions.pop(str(message.from_user.id))
         menu(message)
+        return
     elif message.text == "📈 Стратегия":
         markup = ReplyKeyboardMarkup(
             resize_keyboard=True,
@@ -255,52 +293,64 @@ def new_message(message: telebot.types.Message):
         tg.send_message(message.chat.id, "Успешно изменено!")
         menu(message)
     elif message.text == "🏦 Биржи":
-        settings = db.get_settings(message.from_user.id)["birges"]
+        user_settings = db.get_settings(message.from_user.id)
+        user_birges = user_settings.get("birges", ["Bybit", "Mexc", "Gate", "HTX", "Bitmart", "Kucoin", "OKX", "Coinex", "Poloniex", "BingX"])
         markup = ReplyKeyboardMarkup(
             resize_keyboard=True,
             one_time_keyboard=True,
             row_width=3
         )
-        buttons = [KeyboardButton("✅ "+i if i in settings else "❌ "+i) for i in birges]
+        buttons = [KeyboardButton("✅ "+i if i in user_birges else "❌ "+i) for i in birges]
         markup.add(*buttons, KeyboardButton("Вернуться в меню"))
         tg.send_message(message.chat.id, "Выберите биржи:", reply_markup=markup)
+        return
     elif message.text in bad_birges:
-        settings = db.get_settings(message.from_user.id)
-        settings["birges"].append(message.text[2:])
-        db.set_settings(message.from_user.id, settings)
+        user_settings = db.get_settings(message.from_user.id)
+        user_birges = user_settings.get("birges", [])
+        user_birges.append(message.text[2:])
+        user_settings["birges"] = user_birges
+        db.set_settings(message.from_user.id, user_settings)
         markup = ReplyKeyboardMarkup(
             resize_keyboard=True,
             one_time_keyboard=True,
             row_width=3
         )
-        buttons = [KeyboardButton("✅ "+i if i in settings["birges"] else "❌ "+i) for i in birges]
+        buttons = [KeyboardButton("✅ "+i if i in user_birges else "❌ "+i) for i in birges]
         markup.add(*buttons, KeyboardButton("Вернуться в меню"))
         tg.send_message(message.chat.id, f"Успешно добавлена биржа {message.text[2:]}!", reply_markup=markup)
+        return
     elif message.text in good_birges:
-        settings = db.get_settings(message.from_user.id)
-        settings["birges"].remove(message.text[2:])
-        db.set_settings(message.from_user.id, settings)
+        user_settings = db.get_settings(message.from_user.id)
+        user_birges = user_settings.get("birges", [])
+        user_birges.remove(message.text[2:])
+        user_settings["birges"] = user_birges
+        db.set_settings(message.from_user.id, user_settings)
         markup = ReplyKeyboardMarkup(
             resize_keyboard=True,
             one_time_keyboard=True,
             row_width=3
         )
-        buttons = [KeyboardButton("✅ "+i if i in settings["birges"] else "❌ "+i) for i in birges]
+        buttons = [KeyboardButton("✅ "+i if i in user_birges else "❌ "+i) for i in birges]
         markup.add(*buttons, KeyboardButton("Вернуться в меню"))
         tg.send_message(message.chat.id, f"Успешно удалена биржа {message.text[2:]}!", reply_markup=markup)
+        return
     elif message.text == "Вернуться в меню":
         menu(message)
     elif message.text == "👤 Личный кабинет":
         settings = db.get_settings(message.from_user.id)
         payment = db.get_payment(message.from_user.id)
         answers = ["Минимальный риск", "Сбалансированная", "Максимум прибыли"]
+        volume_min = settings.get("valuen-min", 50)
+        volume_max = settings.get("valuen-max", 150)
+        strategy = settings.get("strategy", 1)
+        user_birgas = settings.get("birges", ["Bybit", "Mexc", "Gate", "HTX", "Bitmart", "Kucoin", "OKX", "Coinex", "Poloniex", "BingX"])
         tg.send_message(message.chat.id, f"""
 👤 Личный кабинет
 
 🔑 Статус подписки: {str(payment)+" дней" if payment != 0 else "Не активна"}
-💰 Объем сделки: ${settings["valuen-min"]}-{settings["valuen-max"]}
-📈 Стратегия: {answers[settings["strategy"]]}
-🏦 Активные биржи: {', '.join(settings["birges"])}
+💰 Объем сделки: ${volume_min}-{volume_max}
+📈 Стратегия: {answers[strategy]}
+🏦 Активные биржи: {', '.join(user_birgas)}
         """)
         menu(message)
     elif message.text == "🚀 Начать поиск":
@@ -358,16 +408,26 @@ def bot_counter():
             time.sleep(10)
 
 
-def find_arbitrage_opportunities(orderbooks: dict[Birga, dict[str, OrderBook]],
+async def find_arbitrage_opportunities(orderbooks: dict[Birga, dict[str, OrderBook]],
                                   volume_min: float, volume_max: float,
+                                  strategy: int = 1,
                                   min_spread: float = 1.0) -> list[dict]:
-    """Находит арбитражные возможности между биржами"""
+    """Находит арбитражные возможности между биржами
+
+    :param strategy: 0 = минимальный риск, 1 = сбалансированная, 2 = максимум прибыли
+    """
     opportunities = []
 
     # Собрать все пары из полученных orderbooks
     all_pairs = set()
     for birga_obs in orderbooks.values():
         all_pairs.update(birga_obs.keys())
+
+    # Стратегия влияет на объём:
+    # strategy 0: объём = volume_min + 20% от range (консервативно)
+    # strategy 1: объём = volume_min + 50% от range (баланс)
+    # strategy 2: объём = volume_min + 80% от range (агрессивно)
+    strategy_risk = [0.2, 0.5, 0.8][strategy]
 
     for pair in all_pairs:
         best_buy = None
@@ -400,12 +460,28 @@ def find_arbitrage_opportunities(orderbooks: dict[Birga, dict[str, OrderBook]],
                 # Расчет спреда
                 spread = ((sell_best_bid.price - best_ask.price) / best_ask.price) * 100
 
-                if spread < min_spread:
+                if spread <= min_spread:
                     continue
 
-                # Расчет объема
-                buy_volume = min(volume_max, best_ask.quantity * best_ask.price)
-                buy_volume = max(volume_min, buy_volume)
+                # Динамический расчёт объёма:
+                # 1. Базовый объём от стратегии + бонус за спред
+                # 2. Ограничиваем ликвидностью ордербука
+                spread_coefficient = max(0, (spread - min_spread) / min_spread)
+                volume_range = volume_max - volume_min
+                base_volume = volume_min + strategy_risk * volume_range
+                dynamic_volume = base_volume + spread_coefficient * volume_range * 0.5
+
+                # Учитываем ликвидность ордербука - ищем максимальный объём который можем закрыть
+                cumulative_volume = 0
+                target_price = best_ask.price * 1.02  # цена +2% от лучшего аска (допустимый проскальзывание)
+                for ask in ob.asks:
+                    if ask.price <= target_price:
+                        cumulative_volume += ask.quantity * ask.price
+                    else:
+                        break
+
+                buy_volume = min(dynamic_volume, cumulative_volume, volume_max)
+                buy_volume = max(buy_volume, volume_min)
 
                 # Расчет комиссий (примерно 0.1% за торговлю + 0.01% за вывод)
                 commission_buy = buy_volume * 0.001
@@ -415,12 +491,31 @@ def find_arbitrage_opportunities(orderbooks: dict[Birga, dict[str, OrderBook]],
                 net_profit = (sell_best_bid.price - best_ask.price) * (buy_volume / best_ask.price)
                 net_profit -= commission_buy + commission_sell + commission_withdraw
 
+                # Расчёт времени жизни связки:
+                # Время = время на "съедание" ордеров + время на блокчейн-подтверждения
+                orders_to_fill = 0
+                volume_filled = 0
+                avg_fill_time_ms = 200  # среднее время заполнения ордера в мс
+                for ask in ob.asks:
+                    if volume_filled >= buy_volume:
+                        break
+                    fill_qty = min(ask.quantity, (buy_volume - volume_filled) / best_ask.price)
+                    volume_filled += fill_qty * best_ask.price
+                    orders_to_fill += 1
+                lifetime_seconds = orders_to_fill * avg_fill_time_ms / 1000 * 600
+                # Конвертируем в часы, минимум 1 минута
+                lifetime_hours = max(1/3600, min(lifetime_seconds / 3600, 24.0))
+
                 if net_profit > best_profit:
                     best_profit = net_profit
                     best_buy = (birga, ob)
                     best_sell = (sell_birga, sell_ob)
 
         if best_buy and best_sell:
+            # Получаем информацию о блокчейне для базовой монеты
+            base_symbol = pair.split('/')[0]
+            blockchain_info = await get_blockchain_info(base_symbol)
+
             opportunities.append({
                 "pair": pair,
                 "buy_birga": best_buy[0],
@@ -431,14 +526,16 @@ def find_arbitrage_opportunities(orderbooks: dict[Birga, dict[str, OrderBook]],
                            min(best_buy[1].asks, key=lambda x: x.price).price) /
                           min(best_buy[1].asks, key=lambda x: x.price).price * 100),
                 "net_profit": best_profit,
-                "volume": volume_min,
-                "lifetime_hours": 8.0,
+                "volume": buy_volume,
+                "lifetime_hours": lifetime_hours,
+                "lifetime_seconds": lifetime_seconds,
+                "blockchain_info": blockchain_info,
             })
 
     return opportunities
 
 
-def arbitrage_loop():
+async def arbitrage_loop_async():
     """Цикл поиска и рассылки арбитражных возможностей"""
     global ALL_ARBITRAGE_PAIRS
 
@@ -449,16 +546,12 @@ def arbitrage_loop():
                 listeners = json.load(f)
 
             if not listeners:
-                time.sleep(30)
+                await asyncio.sleep(30)
                 continue
 
             # Получаем список пар с бирж
             all_birgas = list(Birga)
-
-            async def load_symbols():
-                return await get_all_symbols(all_birgas)
-
-            all_birga_symbols = asyncio.run(load_symbols())
+            all_birga_symbols = await get_all_symbols(all_birgas)
 
             # Универсальные пары (есть на >=2 биржах)
             arbitrage_pairs = get_universal_symbols(all_birga_symbols, min_birgas=2)
@@ -479,6 +572,7 @@ def arbitrage_loop():
                         "birges": user_birgas,
                         "volume_min": settings.get("valuen-min", 50),
                         "volume_max": settings.get("valuen-max", 150),
+                        "strategy": settings.get("strategy", 1),
                     }
 
             # Обрабатываем батчами по 50 пар
@@ -486,18 +580,26 @@ def arbitrage_loop():
             for i in range(0, len(arbitrage_pairs), batch_size):
                 batch_pairs = arbitrage_pairs[i:i+batch_size]
 
-                # Получаем книги ордеров для батча
-                async def run_fetch():
-                    return await fetch_orderbooks_for_symbols(batch_pairs, all_birgas, limit=20)
-
-                orderbooks = asyncio.run(run_fetch())
+                orderbooks = await fetch_orderbooks_for_symbols(batch_pairs, all_birgas, limit=20)
 
                 # Обрабатываем каждого пользователя
                 for uid, uset in user_settings.items():
+                    # Проверяем, не отписался ли пользователь
+                    with open('data/listeners.json', 'r') as f:
+                        current_listeners = json.load(f)
+                    if not any(l["user_id"] == uid for l in current_listeners):
+                        continue
+
                     # Находим возможности для настроек пользователя
-                    opps = find_arbitrage_opportunities(orderbooks, uset["volume_min"], uset["volume_max"])
+                    opps = await find_arbitrage_opportunities(orderbooks, uset["volume_min"], uset["volume_max"], uset["strategy"])
 
                     for opp in opps:
+                        # Повторная проверка перед отправкой
+                        with open('data/listeners.json', 'r') as f:
+                            current_listeners = json.load(f)
+                        if not any(l["user_id"] == uid for l in current_listeners):
+                            break
+
                         msg = format_notification(
                             pair=opp["pair"],
                             buy_ob=opp["buy_ob"],
@@ -508,26 +610,34 @@ def arbitrage_loop():
                             spread=opp["spread"],
                             net_profit=opp["net_profit"],
                             lifetime_hours=opp["lifetime_hours"],
+                            lifetime_seconds=opp.get("lifetime_seconds"),
+                            blockchain_info=opp.get("blockchain_info"),
                         )
                         try:
+                            await asyncio.sleep(0)  # Yield to event loop for tg.send_message
                             tg.send_message(uset["chat_id"], msg, parse_mode="HTML", disable_web_page_preview=True)
+                            await asyncio.sleep(0.5)
                         except Exception as e:
                             print(f"Ошибка отправки пользователю {uid}: {e}")
 
                 # Пауза между батчами
-                time.sleep(2)
+                await asyncio.sleep(2)
 
             # Закрываем сессии
-            asyncio.run(close_all_sessions())
+            await close_all_sessions()
 
             # Пауза между циклами
-            time.sleep(60)
+            await asyncio.sleep(60)
 
         except Exception as e:
             print(f"Ошибка arbitrage_loop: {e}")
             import traceback
             traceback.print_exc()
-            time.sleep(30)
+            await asyncio.sleep(30)
+
+
+def arbitrage_loop():
+    asyncio.run(arbitrage_loop_async())
 
 
 if __name__ == "__main__":

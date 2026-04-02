@@ -1,7 +1,8 @@
 .venv
 utils/__pycache__
 __pycache__
-data/bot.db
-.claude
 config.conf
+data/bot.db
 data/codes.json
+data/listeners.json
+.claude

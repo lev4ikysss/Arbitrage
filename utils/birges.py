@@ -100,7 +100,7 @@ class BybitAPI(BirgaAPI):
                 result = data.get("result", {})
                 bids = [OrderBookEntry(float(b[0]), float(b[1])) for b in result.get("b", [])[:limit]]
                 asks = [OrderBookEntry(float(a[0]), float(a[1])) for a in result.get("a", [])[:limit]]
-                return OrderBook(bids=asks, asks=bids, symbol=symbol, birga=self.name)
+                return OrderBook(bids=bids, asks=asks, symbol=symbol, birga=self.name)
         except Exception:
             return None
 

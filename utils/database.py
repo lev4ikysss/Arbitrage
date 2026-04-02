@@ -35,7 +35,7 @@ class Codes:
         with open(self.path, 'w') as f:
             file = json.dump(file, f, indent=4)
         return True
-    
+
     def write_admin(self, new_code: str) -> None:
         """
             Задаёт новый код для администратора
@@ -67,9 +67,8 @@ class DataBase:
             :path: путь до базы данных
         """
         self.con = sqlite3.connect(path, check_same_thread=False)
-        self.cur = self.con.cursor()
 
-        self.cur.execute("""
+        self.con.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id     INTEGER PRIMARY KEY NOT NULL,
                 chat_id     INTEGER UNIQUE NOT NULL,
@@ -86,7 +85,13 @@ class DataBase:
             Закрывает соединение
         """
         self.con.close()
-    
+
+    def _execute(self, query: str, params: tuple = ()):
+        """Execute a query and return cursor"""
+        cursor = self.con.cursor()
+        cursor.execute(query, params)
+        return cursor
+
     def add_user(self, user_id: int, chat_id: int) -> int:
         """
             Добавление id и chat id пользователя в таблицу
@@ -96,12 +101,12 @@ class DataBase:
             1 - id уже был записан
         """
         try:
-            self.cur.execute("""
+            cursor = self.con.cursor()
+            cursor.execute("""
                 INSERT INTO users (user_id, chat_id)
                 VALUES (?, ?)
             """, (user_id, chat_id))
-            self.con.commit()
-            self.cur.execute("""
+            cursor.execute("""
                 UPDATE users
                 SET settings = ?
                 WHERE settings = '{}'
@@ -110,7 +115,7 @@ class DataBase:
         except:
             return 1
         return 0
-    
+
     def is_register(self, user_id: int) -> bool:
         """
             Проверка регистрации пользователя
@@ -118,11 +123,12 @@ class DataBase:
             True - пользователь зарегистрирован
             False - пользователь не зарегистрирован
         """
-        self.cur.execute("""
+        cursor = self.con.cursor()
+        cursor.execute("""
             SELECT * FROM users
             WHERE user_id = ?
         """, (user_id,))
-        if not self.cur.fetchall():
+        if not cursor.fetchall():
             return False
         return True
 
@@ -131,21 +137,23 @@ class DataBase:
             Проверяет подписку у пользователя
             :user_id: id пользователя
         """
-        self.cur.execute("""
+        cursor = self.con.cursor()
+        cursor.execute("""
             SELECT * FROM users
             WHERE user_id = ? AND is_allowed = TRUE
         """, (user_id,))
-        if not self.cur.fetchall():
+        if not cursor.fetchall():
             return False
         return True
-    
+
     def add_payment(self, user_id: int, payment_add: int) -> None:
         """
             Добавление проплаченных дней пользователю
             :user_id: id пользователя
             :payment_add: кол-во дней добавления
         """
-        self.cur.execute("""
+        cursor = self.con.cursor()
+        cursor.execute("""
             UPDATE users SET
             is_allowed = TRUE, day_payment = day_payment + ?
             WHERE user_id = ?
@@ -156,7 +164,8 @@ class DataBase:
         """
             Удаление статуса is_allowed
         """
-        self.cur.execute("""
+        cursor = self.con.cursor()
+        cursor.execute("""
             UPDATE users SET
             is_allowed = FALSE
             WHERE user_id = ?
@@ -168,12 +177,13 @@ class DataBase:
             Получает кол-во проплаченных дней пользователя
             :user_id: id пользователя
         """
-        self.cur.execute("""
+        cursor = self.con.cursor()
+        cursor.execute("""
             SELECT day_payment FROM users
             WHERE user_id = ?
         """, (user_id,))
         try:
-            return self.cur.fetchone()[0]
+            return cursor.fetchone()[0]
         except:
             return -1
 
@@ -182,7 +192,8 @@ class DataBase:
             Добавляет роль администратора
             :user_id: id пользователя
         """
-        self.cur.execute("""
+        cursor = self.con.cursor()
+        cursor.execute("""
             UPDATE users SET
             is_admin = TRUE, is_allowed = TRUE, day_payment = -1
             WHERE user_id = ?
@@ -194,29 +205,32 @@ class DataBase:
             Проверяет, админ ли пользователь
             :user_id: id пользователя
         """
-        self.cur.execute("""
+        cursor = self.con.cursor()
+        cursor.execute("""
             SELECT 1 FROM users
             WHERE user_id = ? AND is_admin = TRUE
         """, (user_id,))
-        return self.cur.fetchone() is not None
-    
+        return cursor.fetchone() is not None
+
     def get_settings(self, user_id: int) -> dict:
         """
             Получает настройки пользователя
             :user_id: id пользователя
         """
-        self.cur.execute("""
+        cursor = self.con.cursor()
+        cursor.execute("""
             SELECT settings FROM users
             WHERE user_id = ?
         """, (user_id,))
-        return json.loads(self.cur.fetchone()[0])
-    
+        return json.loads(cursor.fetchone()[0])
+
     def set_settings(self, user_id: int, settings: dict) -> None:
         """
             Устанавливает настройки пользователя
             :user_id: id пользователя
         """
-        self.cur.execute("""
+        cursor = self.con.cursor()
+        cursor.execute("""
             UPDATE users SET
             settings = ?
             WHERE user_id = ?
@@ -227,12 +241,13 @@ class DataBase:
         """
             Получает инфо о сроке подписке всех пользователей
         """
-        self.cur.execute("""
+        cursor = self.con.cursor()
+        cursor.execute("""
             SELECT user_id, day_payment FROM users
             WHERE is_allowed = TRUE
         """)
         answer = {}
-        for i in self.cur.fetchall():
+        for i in cursor.fetchall():
             answer[i[0]] = i[1]
         return answer
 
@@ -241,8 +256,9 @@ class DataBase:
             Получает id чата, по id пользователя
             :user_id: id пользователя
         """
-        self.cur.execute("""
+        cursor = self.con.cursor()
+        cursor.execute("""
             SELECT chat_id FROM users
             WHERE user_id = ?
         """, (user_id,))
-        return self.cur.fetchone()[0]
+        return cursor.fetchone()[0]
