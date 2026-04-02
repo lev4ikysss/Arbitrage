@@ -2,3 +2,6 @@
 utils/__pycache__
 __pycache__
 data/bot.db
+.claude
+config.conf
+data/codes.json
