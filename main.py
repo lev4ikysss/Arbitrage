@@ -11,7 +11,7 @@ from utils.database import DataBase
 from utils.birges import (
     Birga, get_birga_api, fetch_orderbooks_for_symbols,
     close_all_sessions, OrderBook, get_all_symbols, get_universal_symbols,
-    BIRGA_REGISTRY
+    BIRGA_REGISTRY, get_all_token_addresses
 )
 from utils.blockchain import get_blockchain_info
 
@@ -409,6 +409,7 @@ def bot_counter():
 
 
 async def find_arbitrage_opportunities(orderbooks: dict[Birga, dict[str, OrderBook]],
+                                  token_addresses: dict[Birga, dict[str, str]],
                                   volume_min: float, volume_max: float,
                                   strategy: int = 1,
                                   min_spread: float = 1.0) -> list[dict]:
@@ -451,6 +452,14 @@ async def find_arbitrage_opportunities(orderbooks: dict[Birga, dict[str, OrderBo
             for sell_birga in orderbooks.keys():
                 if sell_birga == birga or pair not in orderbooks[sell_birga]:
                     continue
+
+                # Проверяем адреса контрактов - если разные, пропускаем
+                addr1 = token_addresses.get(birga, {}).get(pair, None)
+                addr2 = token_addresses.get(sell_birga, {}).get(pair, None)
+                if addr1 is not None and addr2 is not None and addr1 != addr2:
+                    # Разные контракты - пропускаем
+                    continue
+
                 sell_ob = orderbooks[sell_birga][pair]
                 if not sell_ob.bids:
                     continue
@@ -553,8 +562,11 @@ async def arbitrage_loop_async():
             all_birgas = list(Birga)
             all_birga_symbols = await get_all_symbols(all_birgas)
 
-            # Универсальные пары (есть на >=2 биржах)
-            arbitrage_pairs = get_universal_symbols(all_birga_symbols, min_birgas=2)
+            # Получаем адреса контрактов токенов
+            token_addresses = await get_all_token_addresses(all_birgas)
+
+            # Универсальные пары (есть на >=2 биржах с одинаковым адресом контракта)
+            arbitrage_pairs = get_universal_symbols(all_birga_symbols, token_addresses, min_birgas=2)
             ALL_ARBITRAGE_PAIRS = arbitrage_pairs
 
             if len(arbitrage_pairs) < 100:
@@ -591,7 +603,7 @@ async def arbitrage_loop_async():
                         continue
 
                     # Находим возможности для настроек пользователя
-                    opps = await find_arbitrage_opportunities(orderbooks, uset["volume_min"], uset["volume_max"], uset["strategy"])
+                    opps = await find_arbitrage_opportunities(orderbooks, token_addresses, uset["volume_min"], uset["volume_max"], uset["strategy"])
 
                     for opp in opps:
                         # Повторная проверка перед отправкой

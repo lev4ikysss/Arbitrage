@@ -31,6 +31,7 @@ class OrderBook:
     asks: list[OrderBookEntry]
     symbol: str
     birga: Birga
+    token_address: Optional[str] = None  # Адрес контракта токена
 
 
 class BirgaAPI:
@@ -52,6 +53,10 @@ class BirgaAPI:
     async def get_all_symbols(self) -> list[str]:
         """Получить список всех USDT-пар на бирже"""
         raise NotImplementedError
+
+    async def get_token_address(self, symbol: str) -> Optional[str]:
+        """Получить адрес контракта токена для символа (BASE часть)"""
+        return None
 
     def _normalize_symbol(self, symbol: str) -> str:
         """Нормализовать символ для API биржи (USDT -> USDT)"""
@@ -125,6 +130,27 @@ class BybitAPI(BirgaAPI):
                 return symbols
         except Exception:
             return []
+
+    async def get_token_address(self, symbol: str) -> Optional[str]:
+        """Получить адрес контракта токена для Bybit"""
+        try:
+            session = await self._get_session()
+            formatted = self._format_symbol(symbol)
+            url = f"{self.base_url}/v5/market/instruments-info"
+            params = {"category": "spot", "symbol": formatted}
+            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+                if data.get("retCode") != 0:
+                    return None
+                result = data.get("result", {})
+                list_data = result.get("list", [])
+                if list_data:
+                    return list_data[0].get("baseCoin", None)
+                return None
+        except Exception:
+            return None
 
 
 class MexcAPI(BirgaAPI):
@@ -681,6 +707,93 @@ _symbols_cache: dict[Birga, list[str]] = {}
 _symbols_cache_time: float = 0
 SYMBOLS_CACHE_TTL: float = 300  # 5 минут
 
+# Кэш адресов контрактов токенов: {birga: {symbol: address}}
+_token_addresses_cache: dict[Birga, dict[str, str]] = {}
+_token_addresses_cache_time: float = 0
+TOKEN_ADDRESSES_CACHE_TTL: float = 3600  # 1 час
+
+
+async def get_all_token_addresses(birgas: list[Birga], force_refresh: bool = False) -> dict[Birga, dict[str, str]]:
+    """
+    Получить адреса контрактов всех токенов с указанных бирж.
+    Returns: {birga: {"ATOM": "0x123...", "BTC": None, ...}}
+    """
+    global _token_addresses_cache, _token_addresses_cache_time
+    import time
+
+    now = time.time()
+    if not force_refresh and (now - _token_addresses_cache_time) < TOKEN_ADDRESSES_CACHE_TTL:
+        return {b: _token_addresses_cache.get(b, {}) for b in birgas}
+
+    new_cache: dict[Birga, dict[str, str]] = {b: {} for b in birgas}
+
+    # Mexc предоставляет contract address в API
+    async def fetch_mexc_addresses(api: MexcAPI) -> dict[str, str]:
+        try:
+            session = await api._get_session()
+            url = f"{api.base_url}/api/v3/exchangeInfo"
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    return {}
+                data = await resp.json()
+                addresses = {}
+                for item in data.get("symbols", []):
+                    if item.get("quoteAsset") == "USDT" and item.get("status") == "1":
+                        base = item.get("baseAsset", "")
+                        contract = item.get("baseAssetContractAddress", "")
+                        if base and contract:
+                            addresses[f"{base}/USDT"] = contract.lower()
+                        elif base:
+                            addresses[f"{base}/USDT"] = None  # Нативный токен
+                return addresses
+        except Exception:
+            return {}
+
+    # Gate.io предоставляет contract address
+    async def fetch_gate_addresses(api: GateAPI) -> dict[str, str]:
+        try:
+            session = await api._get_session()
+            url = f"{api.base_url}/api/v4/spot/currencies"
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    return {}
+                data = await resp.json()
+                addresses = {}
+                for curr in data:
+                    currency = curr.get("currency", "")
+                    # Gate разделяет withdraw_address_checks и другие поля
+                    # Попробуем получить из списка валют
+                    if currency and currency != "USDT":
+                        addresses[f"{currency}/USDT"] = curr.get("contract_address", "").lower() or None
+                return addresses
+        except Exception:
+            return {}
+
+    # Для остальных бирж возвращаем пустой словарь (адреса недоступны)
+    async def fetch_other_addresses(api: BirgaAPI) -> dict[str, str]:
+        return {}
+
+    tasks = []
+    for birga in birgas:
+        api = get_birga_api(birga)
+        if birga == Birga.MEXC:
+            tasks.append(fetch_mexc_addresses(api))
+        elif birga == Birga.GATE:
+            tasks.append(fetch_gate_addresses(api))
+        else:
+            tasks.append(fetch_other_addresses(api))
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for i, birga in enumerate(birgas):
+        if isinstance(results[i], dict):
+            new_cache[birga] = results[i]
+
+    _token_addresses_cache = new_cache
+    _token_addresses_cache_time = now
+
+    return {b: new_cache.get(b, {}) for b in birgas}
+
 
 async def get_all_symbols(birgas: list[Birga], force_refresh: bool = False) -> dict[Birga, list[str]]:
     """
@@ -714,17 +827,50 @@ async def get_all_symbols(birgas: list[Birga], force_refresh: bool = False) -> d
     return {b: new_cache.get(b, []) for b in birgas}
 
 
-def get_universal_symbols(all_birga_symbols: dict[Birga, list[str]], min_birgas: int = 2) -> list[str]:
+def get_universal_symbols(
+    all_birga_symbols: dict[Birga, list[str]],
+    token_addresses: dict[Birga, dict[str, str]] = None,
+    min_birgas: int = 2
+) -> list[str]:
     """
-    Получить символы, которые торгуются как минимум на min_birgas биржах.
+    Получить символы, которые торгуются как минимум на min_birgas биржах
+    с одинаковым адресом контракта.
     """
+    if token_addresses is None:
+        token_addresses = {}
+
     symbol_birga_count: dict[str, int] = {}
     symbol_first_occurrence: dict[str, str] = {}
+    symbol_addresses: dict[str, set] = {}
 
     for birga, symbols in all_birga_symbols.items():
         for sym in symbols:
             if sym not in symbol_birga_count:
                 symbol_first_occurrence[sym] = birga.value
+                symbol_addresses[sym] = set()
+
             symbol_birga_count[sym] = symbol_birga_count.get(sym, 0) + 1
 
-    return [s for s, count in symbol_birga_count.items() if count >= min_birgas]
+            # Запоминаем адрес контракта для этой биржи
+            addr = token_addresses.get(birga, {}).get(sym, None)
+            symbol_addresses[sym].add(addr)
+
+    # Фильтруем: оставляем только пары, где адрес контракта одинаковый на всех биржах
+    result = []
+    for sym, count in symbol_birga_count.items():
+        if count < min_birgas:
+            continue
+
+        addresses = symbol_addresses[sym]
+        # Если все адреса None (нативные токены без контракта) или все одинаковые - ок
+        if len(addresses) == 1:
+            result.append(sym)
+        else:
+            # Есть разные адреса - проверяем что все не-None одинаковые
+            non_none = {a for a in addresses if a is not None}
+            if len(non_none) <= 1:
+                # Все адреса None или только один не-None - может быть нативный токен
+                result.append(sym)
+            # Иначе разные контракты - пропускаем
+
+    return result
