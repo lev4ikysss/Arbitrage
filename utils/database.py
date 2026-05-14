@@ -244,7 +244,7 @@ class DataBase:
         cursor = self.con.cursor()
         cursor.execute("""
             SELECT user_id, day_payment FROM users
-            WHERE is_allowed = TRUE
+            WHERE is_allowed = TRUE AND is_admin = FALSE
         """)
         answer = {}
         for i in cursor.fetchall():
@@ -262,3 +262,40 @@ class DataBase:
             WHERE user_id = ?
         """, (user_id,))
         return cursor.fetchone()[0]
+
+
+class Blacklist:
+    """Работа с чёрным списком токенов"""
+
+    def __init__(self, path: str):
+        self.path = path
+        self._ensure_file()
+
+    def _ensure_file(self):
+        import os
+        if not os.path.exists(self.path):
+            with open(self.path, 'w') as f:
+                json.dump([], f)
+
+    def get(self) -> list[str]:
+        with open(self.path, 'r') as f:
+            return json.load(f)
+
+    def add(self, token: str):
+        data = self.get()
+        token = token.strip().upper()
+        if token and token not in data:
+            data.append(token)
+            with open(self.path, 'w') as f:
+                json.dump(data, f, indent=4)
+
+    def remove(self, token: str):
+        data = self.get()
+        token = token.strip().upper()
+        if token in data:
+            data.remove(token)
+            with open(self.path, 'w') as f:
+                json.dump(data, f, indent=4)
+
+    def exists(self, token: str) -> bool:
+        return token.strip().upper() in self.get()

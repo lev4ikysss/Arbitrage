@@ -6,3 +6,4 @@ data/bot.db
 data/codes.json
 data/listeners.json
 .claude
+config.conf

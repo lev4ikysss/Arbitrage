@@ -8,6 +8,7 @@ from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 from utils.settings import GetParams
 from utils.database import Codes
 from utils.database import DataBase
+from utils.database import Blacklist
 from utils.birges import (
     Birga, get_birga_api, fetch_orderbooks_for_symbols,
     close_all_sessions, OrderBook, get_all_symbols, get_universal_symbols,
@@ -20,6 +21,7 @@ params = GetParams("config.conf")
 tg = telebot.TeleBot(params.token_tg)
 codes = Codes(params.codes_path)
 db = DataBase(params.db_path)
+blacklist = Blacklist("data/blacklist.json")
 birges = ["Bybit", "Mexc", "Gate", "HTX", "Bitmart", "Kucoin", "OKX", "Coinex", "Poloniex", "BingX"]
 bad_birges = ["❌ "+i for i in birges]
 good_birges = ["✅ "+i for i in birges]
@@ -30,6 +32,9 @@ with open('data/listeners.json', 'r') as f: in_searching = json.load(f)
 # Динамический список пар (загружается с бирж)
 ALL_ARBITRAGE_PAIRS: list[str] = []
 
+# Маппинг имени биржи -> Birga enum
+BIRGA_BY_NAME = {b.value: b for b in Birga}
+
 def format_notification(pair: str, buy_ob: OrderBook, sell_ob: OrderBook,
                         buy_exchange: str, sell_exchange: str,
                         volume: float, spread: float,
@@ -38,12 +43,14 @@ def format_notification(pair: str, buy_ob: OrderBook, sell_ob: OrderBook,
                         blockchain_info: dict = None) -> str:
     """Форматирует уведомление о арбитражной связке"""
 
-    def format_orders(ob: OrderBook) -> str:
-        total_qty = sum(e.quantity for e in ob.asks)
-        if ob.asks:
-            avg_price = sum(e.price * e.quantity for e in ob.asks) / total_qty
-            orders_info = f"{len(ob.asks)} ордеров: " + ", ".join(
-                f"{e.quantity:.4f} - {e.price}" for e in ob.asks[:3]
+    def format_orders(ob: OrderBook, side: str = "buy") -> str:
+        orders = ob.asks if side == "buy" else ob.bids
+        total_qty = sum(e.quantity for e in orders)
+        if orders:
+            avg_price = sum(e.price * e.quantity for e in orders) / total_qty
+            label = "асков" if side == "buy" else "бидов"
+            orders_info = f"{len(orders)} {label}: " + ", ".join(
+                f"{e.quantity:.4f} - {e.price}" for e in orders[:3]
             )
             return f"Средняя цена: {avg_price:.6f}\n{orders_info}"
         return "Нет ордеров"
@@ -81,10 +88,10 @@ def format_notification(pair: str, buy_ob: OrderBook, sell_ob: OrderBook,
     return f"""💠 {pair}
 
 🔹 Купить → {buy_exchange} (<a href="{buy_trade_url}">торговля</a>) | <a href="{buy_withdraw_url}">вывод</a>
-         {format_orders(buy_ob)}
+         {format_orders(buy_ob, "buy")}
 
 🔹 Продать → {sell_exchange} (<a href="{sell_trade_url}">торговля</a>) | <a href="{sell_deposit_url}">депозит</a>
-         {format_orders(sell_ob)}
+         {format_orders(sell_ob, "sell")}
 
 
 💰 Объём: {volume:.2f} USDT
@@ -106,7 +113,7 @@ def get_exchange_trade_url(exchange: str, pair: str) -> str:
         "Bybit": f"https://www.bybit.com/ru/trade/{p}",
         "Mexc": f"https://www.mexc.com/ru/trade/{p}",
         "Gate": f"https://www.gate.io/ru/trade/{p}",
-        "HTX": f"https://www.htx.com/en-us/exchange/{p.lower()}",
+        "HTX": f"https://www.htx.com/en-us/trade/{p.lower()}/",
         "Bitmart": f"https://www.bitmart.com/ru/trade/{p}",
         "Kucoin": f"https://www.kucoin.com/ru/trade/{p}",
         "OKX": f"https://www.okx.com/ru/trade/{p.lower()}",
@@ -124,7 +131,7 @@ def get_exchange_withdraw_url(exchange: str, pair: str) -> str:
         "Bybit": "https://www.bybit.com/assets/spot/withdraw",
         "Mexc": "https://www.mexc.com/assets/spot/withdraw",
         "Gate": "https://www.gateio.me/assets/spot/withdraw",
-        "HTX": "https://www.htx.com/en-us/finance/withdrawal/",
+        "HTX": "https://www.htx.com/en-us/finance/withdraw/",
         "Bitmart": "https://www.bitmart.com/withdraw",
         "Kucoin": "https://www.kucoin.com/assets/withdraw",
         "OKX": "https://www.okx.com/ru/finance/withdraw/",
@@ -176,7 +183,8 @@ def menu(message: telebot.types.Message):
             KeyboardButton("🏦 Биржи"),
             KeyboardButton("💰 Объем сделки"),
             KeyboardButton("⚙️ Тех. поддержка"),
-            KeyboardButton("Создать код регистрации")
+            KeyboardButton("Создать код регистрации"),
+            KeyboardButton("🚫 Черный список")
         )
     tg.send_message(message.chat.id, "Меню:", reply_markup=markup)
 
@@ -184,7 +192,6 @@ def menu(message: telebot.types.Message):
 def start(message: telebot.types.Message):
     if not db.is_register(message.from_user.id):
         tg.reply_to(message, "Привет! Введи код регистрации для продолжения")
-        db.add_user(message.from_user.id, message.chat.id)
     elif not db.is_payment(message.from_user.id):
         tg.reply_to(message, "Введи код регистрации для продолжения")
     else:
@@ -205,9 +212,63 @@ def new_message(message: telebot.types.Message):
         key = codes.generate_invite()
         tg.send_message(message.chat.id, f"Код: {key}")
         menu(message)
-    elif not (db.is_register(message.from_user.id) or db.is_payment(message.from_user.id)):
+    elif message.text == "🚫 Черный список" and db.is_admin(message.from_user.id):
+        tokens = blacklist.get()
+        msg = "📋 Текущий черный список:\n"
+        if tokens:
+            msg += "\n".join(f"• {t}" for t in tokens)
+        else:
+            msg += "(пусто)"
+        msg += "\n\nВведи имя токена для добавления\nИли нажми кнопку для удаления:"
+        markup = ReplyKeyboardMarkup(
+            resize_keyboard=True,
+            one_time_keyboard=True,
+            row_width=2
+        )
+        markup.add(
+            KeyboardButton("➖ Удалить токен"),
+            KeyboardButton("Вернуться в меню")
+        )
+        tg.send_message(message.chat.id, msg, reply_markup=markup)
+        actions[str(message.from_user.id)] = {"chat_id": message.chat.id, "action": "blacklist"}
+    elif message.text == "➖ Удалить токен" and str(message.from_user.id) in actions and actions[str(message.from_user.id)].get("action") in ("blacklist", "blacklist_remove"):
+        tokens = blacklist.get()
+        if not tokens:
+            tg.send_message(message.chat.id, "Черный список пуст")
+            actions.pop(str(message.from_user.id))
+            menu(message)
+        else:
+            markup = ReplyKeyboardMarkup(
+                resize_keyboard=True,
+                one_time_keyboard=True,
+                row_width=3
+            )
+            markup.add(*[KeyboardButton(t) for t in tokens], KeyboardButton("Вернуться в меню"))
+            tg.send_message(message.chat.id, "Выбери токен для удаления:", reply_markup=markup)
+            actions[str(message.from_user.id)] = {"chat_id": message.chat.id, "action": "blacklist_remove"}
+    elif str(message.from_user.id) in actions and actions[str(message.from_user.id)].get("action") == "blacklist":
+        token = message.text.strip().upper()
+        if not token:
+            tg.send_message(message.chat.id, "Имя токена не может быть пустым")
+            return
+        blacklist.add(token)
+        tg.send_message(message.chat.id, f"✅ Токен {token} добавлен в черный список")
+        actions.pop(str(message.from_user.id))
+        menu(message)
+    elif str(message.from_user.id) in actions and actions[str(message.from_user.id)].get("action") == "blacklist_remove":
+        token = message.text.strip().upper()
+        if blacklist.exists(token):
+            blacklist.remove(token)
+            tg.send_message(message.chat.id, f"✅ Токен {token} удален из черного списка")
+        else:
+            tg.send_message(message.chat.id, f"❌ Токен {token} не найден в черном списке")
+        actions.pop(str(message.from_user.id))
+        menu(message)
+    elif not db.is_register(message.from_user.id):
         tg.reply_to(message, "Ты не зарегистрирован, пропиши /start для начала!")
-        db.add_user(message.from_user.id, message.chat.id)
+        return None
+    elif not db.is_payment(message.from_user.id):
+        tg.reply_to(message, "Твой доступ истёк! Введи новый код регистрации для продолжения.")
         return None
 
     if message.text == "⚙️ Тех. поддержка":
@@ -412,12 +473,21 @@ async def find_arbitrage_opportunities(orderbooks: dict[Birga, dict[str, OrderBo
                                   token_addresses: dict[Birga, dict[str, str]],
                                   volume_min: float, volume_max: float,
                                   strategy: int = 1,
-                                  min_spread: float = 1.0) -> list[dict]:
+                                  min_spread: float = 1.0,
+                                  active_birgas: list[Birga] = None) -> list[dict]:
     """Находит арбитражные возможности между биржами
 
     :param strategy: 0 = минимальный риск, 1 = сбалансированная, 2 = максимум прибыли
+    :param active_birgas: список активных бирж пользователя (если None — все)
     """
     opportunities = []
+
+    # Фильтруем orderbooks по активным биржам пользователя
+    if active_birgas:
+        orderbooks = {b: orderbooks[b] for b in active_birgas if b in orderbooks}
+
+    if len(orderbooks) < 2:
+        return opportunities
 
     # Собрать все пары из полученных orderbooks
     all_pairs = set()
@@ -434,6 +504,9 @@ async def find_arbitrage_opportunities(orderbooks: dict[Birga, dict[str, OrderBo
         best_buy = None
         best_sell = None
         best_profit = 0.0
+        buy_volume = 0.0
+        lifetime_seconds = 0.0
+        lifetime_hours = 0.0
 
         # Собираем лучшие цены покупки и продажи по биржам
         for birga in orderbooks.keys():
@@ -569,6 +642,11 @@ async def arbitrage_loop_async():
             arbitrage_pairs = get_universal_symbols(all_birga_symbols, token_addresses, min_birgas=2)
             ALL_ARBITRAGE_PAIRS = arbitrage_pairs
 
+            # Фильтруем пары по чёрному списку токенов
+            blacklisted_tokens = blacklist.get()
+            if blacklisted_tokens:
+                arbitrage_pairs = [p for p in arbitrage_pairs if p.split('/')[0] not in blacklisted_tokens]
+
             if len(arbitrage_pairs) < 100:
                 print(f"Предупреждение: найдено только {len(arbitrage_pairs)} пар")
 
@@ -578,7 +656,7 @@ async def arbitrage_loop_async():
                 uid = listener["user_id"]
                 if uid not in user_settings:
                     settings = db.get_settings(uid)
-                    user_birgas = [Birga[b.upper()] for b in settings.get("birges", birges) if b in [b.value for b in Birga]]
+                    user_birgas = [BIRGA_BY_NAME[b] for b in settings.get("birges", birges) if b in BIRGA_BY_NAME]
                     user_settings[uid] = {
                         "chat_id": listener["chat_id"],
                         "birges": user_birgas,
@@ -603,7 +681,7 @@ async def arbitrage_loop_async():
                         continue
 
                     # Находим возможности для настроек пользователя
-                    opps = await find_arbitrage_opportunities(orderbooks, token_addresses, uset["volume_min"], uset["volume_max"], uset["strategy"])
+                    opps = await find_arbitrage_opportunities(orderbooks, token_addresses, uset["volume_min"], uset["volume_max"], uset["strategy"], active_birgas=uset["birges"])
 
                     for opp in opps:
                         # Повторная проверка перед отправкой

@@ -653,10 +653,15 @@ BIRGA_REGISTRY: dict[Birga, type[BirgaAPI]] = {
     Birga.BINGX: BingXAPI,
 }
 
+# Кеш API-инстансов для переиспользования сессий
+_api_instances: dict[Birga, BirgaAPI] = {}
+
 
 def get_birga_api(birga: Birga) -> BirgaAPI:
-    """Получить экземпляр API для биржи"""
-    return BIRGA_REGISTRY[birga]()
+    """Получить экземпляр API для биржи (с кешированием)"""
+    if birga not in _api_instances:
+        _api_instances[birga] = BIRGA_REGISTRY[birga]()
+    return _api_instances[birga]
 
 
 async def fetch_orderbooks_for_symbols(
@@ -697,9 +702,9 @@ async def fetch_orderbooks_for_symbols(
 
 async def close_all_sessions():
     """Закрыть все сессии"""
-    for api_class in BIRGA_REGISTRY.values():
-        api = api_class()
+    for api in _api_instances.values():
         await api.close()
+    _api_instances.clear()
 
 
 # Кэш символов
@@ -749,7 +754,7 @@ async def get_all_token_addresses(birgas: list[Birga], force_refresh: bool = Fal
         except Exception:
             return {}
 
-    # Gate.io предоставляет contract address
+    # Gate.io предоставляет contract address в chains
     async def fetch_gate_addresses(api: GateAPI) -> dict[str, str]:
         try:
             session = await api._get_session()
@@ -761,10 +766,16 @@ async def get_all_token_addresses(birgas: list[Birga], force_refresh: bool = Fal
                 addresses = {}
                 for curr in data:
                     currency = curr.get("currency", "")
-                    # Gate разделяет withdraw_address_checks и другие поля
-                    # Попробуем получить из списка валют
-                    if currency and currency != "USDT":
-                        addresses[f"{currency}/USDT"] = curr.get("contract_address", "").lower() or None
+                    if not currency or currency == "USDT":
+                        continue
+                    chains = curr.get("chains", [])
+                    contract_addr = None
+                    for chain in chains:
+                        addr = chain.get("contract_address", "")
+                        if addr:
+                            contract_addr = addr.lower()
+                            break
+                    addresses[f"{currency}/USDT"] = contract_addr or None
                 return addresses
         except Exception:
             return {}

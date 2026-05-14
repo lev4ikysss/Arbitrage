@@ -190,7 +190,7 @@ async def get_blockchain_info(symbol: str) -> BlockchainInfo:
             symbol=symbol,
             confirmations=network_data["confirmations"],
             avg_block_time=network_data["block_time"],
-            is_native=network_data.get("is_native", symbol == network)
+            is_native=(symbol == network)
         )
         _blockchain_cache[cache_key] = info
         return info
